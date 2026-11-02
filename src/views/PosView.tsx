@@ -14,7 +14,10 @@ import {
   AlertCircle,
   Receipt,
   Eye,
-  ExternalLink
+  ExternalLink,
+  Percent,
+  DollarSign,
+  X
 } from 'lucide-react';
 
 interface CarritoItem {
@@ -51,6 +54,10 @@ export const PosView = () => {
 
   const [productoSeleccionado, setProductoSeleccionado] = useState<any | null>(null);
 
+  const [mostrarModalDescuento, setMostrarModalDescuento] = useState(false);
+  const [tipoDescuentoTemp, setTipoDescuentoTemp] = useState<'monto' | 'porcentaje'>('monto');
+  const [valorDescuentoTemp, setValorDescuentoTemp] = useState('');
+
   const [mostrarModalCobro, setMostrarModalCobro] = useState(false);
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'transferencia' | 'debito' | 'credito' | 'mixto'>('efectivo');
   const [montoEfectivoMixto, setMontoEfectivoMixto] = useState('');
@@ -63,7 +70,6 @@ export const PosView = () => {
 
   const [toastExito, setToastExito] = useState<{ mostrar: boolean; monto: number; ventaId?: string; offline?: boolean } | null>(null);
 
-  // Historial del turno para el vendedor
   const [mostrarModalHistorial, setMostrarModalHistorial] = useState(false);
   const [ventasTurno, setVentasTurno] = useState<any[]>([]);
   const [ticketDetalleVendedor, setTicketDetalleVendedor] = useState<any | null>(null);
@@ -81,6 +87,12 @@ export const PosView = () => {
         supabase.from('productos').select(`
           *,
           categorias (nombre),
+          productos_precios_sucursal (
+            id,
+            sucursal_id,
+            precio_costo,
+            precio_venta
+          ),
           variantes (
             id,
             color,
@@ -105,6 +117,17 @@ export const PosView = () => {
       if (cacheCat) setCategorias(JSON.parse(cacheCat));
       if (cacheProd) setProductos(JSON.parse(cacheProd));
     }
+  };
+
+  const obtenerPreciosSucursal = (prod: any) => {
+    const precioEspecifico = prod?.productos_precios_sucursal?.find(
+      (ps: any) => ps.sucursal_id === sucursalActiva?.id
+    );
+
+    return {
+      costo: precioEspecifico ? Number(precioEspecifico.precio_costo) : Number(prod?.precio_costo || 0),
+      venta: precioEspecifico ? Number(precioEspecifico.precio_venta) : Number(prod?.precio_venta || 0)
+    };
   };
 
   const cargarHistorialTurnoVendedor = async () => {
@@ -168,9 +191,11 @@ export const PosView = () => {
     const stockActual = variante.stock_sucursal?.find((s: any) => s.sucursal_id === sucursalActiva?.id)?.cantidad || 0;
 
     if (stockActual <= 0 && navigator.onLine) {
-      setMensajePos(`Sin stock para ${producto.nombre} (${variante.color} - ${variante.talles_catalogo?.etiqueta}) en este local.`);
+      setMensajePos(`Sin stock para ${producto.nombre} (${variante.color} - Talle ${variante.talles_catalogo?.etiqueta}) en este local.`);
       return;
     }
+
+    const preciosLocal = obtenerPreciosSucursal(producto);
 
     setCarritos((prev) =>
       prev.map((c) => {
@@ -192,8 +217,8 @@ export const PosView = () => {
             productoNombre: producto.nombre,
             color: variante.color,
             talle: variante.talles_catalogo?.etiqueta || 'U',
-            precioUnitario: producto.precio_venta,
-            costoUnitario: producto.precio_costo,
+            precioUnitario: preciosLocal.venta,
+            costoUnitario: preciosLocal.costo,
             cantidad: 1,
             stockDisponible: stockActual
           };
@@ -226,6 +251,40 @@ export const PosView = () => {
         return { ...c, items: actualizados };
       })
     );
+  };
+
+  const abrirModalDescuento = () => {
+    setTipoDescuentoTemp(carritoActual.descuentoTipo === 'porcentaje' ? 'porcentaje' : 'monto');
+    setValorDescuentoTemp(carritoActual.descuentoValor > 0 ? carritoActual.descuentoValor.toString() : '');
+    setMostrarModalDescuento(true);
+  };
+
+  const aplicarDescuento = (e: React.FormEvent) => {
+    e.preventDefault();
+    const val = parseFloat(valorDescuentoTemp) || 0;
+
+    setCarritos((prev) =>
+      prev.map((c) => {
+        if (c.id !== carritoActivoId) return c;
+        if (val <= 0) {
+          return { ...c, descuentoTipo: 'ninguno', descuentoValor: 0 };
+        }
+        return {
+          ...c,
+          descuentoTipo: tipoDescuentoTemp,
+          descuentoValor: val
+        };
+      })
+    );
+
+    setMostrarModalDescuento(false);
+  };
+
+  const quitarDescuento = () => {
+    setCarritos((prev) =>
+      prev.map((c) => (c.id === carritoActivoId ? { ...c, descuentoTipo: 'ninguno', descuentoValor: 0 } : c))
+    );
+    setMostrarModalDescuento(false);
   };
 
   const subtotal = carritoActual.items.reduce((acc, item) => acc + item.precioUnitario * item.cantidad, 0);
@@ -499,28 +558,32 @@ export const PosView = () => {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[640px] overflow-y-auto pr-1">
-          {productosFiltrados.map((prod) => (
-            <div
-              key={prod.id}
-              onClick={() => setProductoSeleccionado(prod)}
-              className="bg-slate-900 border border-slate-800 hover:border-sky-500/60 rounded-xl p-3 flex flex-col justify-between cursor-pointer transition-all hover:scale-[1.02] shadow-sm select-none"
-            >
-              <div>
-                <span className="text-[10px] font-semibold uppercase text-slate-500 tracking-wider">
-                  {prod.categorias?.nombre}
-                </span>
-                <h4 className="font-bold text-slate-100 text-sm mt-0.5 line-clamp-2">
-                  {prod.nombre}
-                </h4>
+          {productosFiltrados.map((prod) => {
+            const precios = obtenerPreciosSucursal(prod);
+
+            return (
+              <div
+                key={prod.id}
+                onClick={() => setProductoSeleccionado(prod)}
+                className="bg-slate-900 border border-slate-800 hover:border-sky-500/60 rounded-xl p-3 flex flex-col justify-between cursor-pointer transition-all hover:scale-[1.02] shadow-sm select-none"
+              >
+                <div>
+                  <span className="text-[10px] font-semibold uppercase text-slate-500 tracking-wider">
+                    {prod.categorias?.nombre}
+                  </span>
+                  <h4 className="font-bold text-slate-100 text-sm mt-0.5 line-clamp-2">
+                    {prod.nombre}
+                  </h4>
+                </div>
+                <div className="mt-3 flex justify-between items-baseline border-t border-slate-800/80 pt-2">
+                  <span className="text-xs text-slate-400">Variantes</span>
+                  <span className="font-extrabold text-emerald-400 text-sm">
+                    ${Number(precios.venta).toLocaleString()}
+                  </span>
+                </div>
               </div>
-              <div className="mt-3 flex justify-between items-baseline border-t border-slate-800/80 pt-2">
-                <span className="text-xs text-slate-400">Variantes</span>
-                <span className="font-extrabold text-emerald-400 text-sm">
-                  ${Number(prod.precio_venta).toLocaleString()}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -573,7 +636,7 @@ export const PosView = () => {
                 <div>
                   <p className="font-bold text-slate-100">{item.productoNombre}</p>
                   <p className="text-slate-400 text-[11px]">
-                    {item.color} • Talle {item.talle}
+                    {item.color} - Talle {item.talle}
                   </p>
                   <p className="text-emerald-400 font-semibold mt-0.5">
                     ${Number(item.precioUnitario).toLocaleString()}
@@ -618,7 +681,9 @@ export const PosView = () => {
 
             {descuentoTotal > 0 && (
               <div className="flex justify-between text-rose-400">
-                <span>Descuento:</span>
+                <span className="flex items-center gap-1">
+                  Descuento ({carritoActual.descuentoTipo === 'porcentaje' ? `${carritoActual.descuentoValor}%` : `$${carritoActual.descuentoValor.toLocaleString()}`}):
+                </span>
                 <span className="font-semibold">-${descuentoTotal.toLocaleString()}</span>
               </div>
             )}
@@ -631,23 +696,20 @@ export const PosView = () => {
 
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => {
-                const tipo = prompt('Tipo de descuento: escribe "porcentaje" o "monto"') as any;
-                if (tipo === 'porcentaje' || tipo === 'monto') {
-                  const valor = parseFloat(prompt('Valor del descuento:') || '0');
-                  setCarritos((prev) =>
-                    prev.map((c) => (c.id === carritoActivoId ? { ...c, descuentoTipo: tipo, descuentoValor: valor } : c))
-                  );
-                }
-              }}
-              className="py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+              onClick={abrirModalDescuento}
+              className={`py-2 px-3 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 border ${
+                carritoActual.descuentoValor > 0
+                  ? 'bg-sky-500/10 border-sky-500/40 text-sky-400 hover:bg-sky-500/20'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+              }`}
             >
-              % Descuento
+              <Percent className="w-3.5 h-3.5" />
+              {carritoActual.descuentoValor > 0 ? 'Editar Descuento' : 'Descuento'}
             </button>
 
             <button
               onClick={agregarNuevoCarrito}
-              className="py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 cursor-pointer"
+              className="py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer border border-slate-700"
             >
               <PauseCircle className="w-3.5 h-3.5" /> Pausar
             </button>
@@ -659,7 +721,7 @@ export const PosView = () => {
               setErrorCobro(null);
               setMostrarModalCobro(true);
             }}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold py-3 rounded-lg transition-colors cursor-pointer text-sm uppercase tracking-wider"
+            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold py-3 rounded-lg transition-colors cursor-pointer text-sm uppercase tracking-wider shadow-lg"
           >
             Cobrar ${totalFinal.toLocaleString()}
           </button>
@@ -716,6 +778,120 @@ export const PosView = () => {
                 );
               })}
             </div>
+          </div>
+        </div>
+      )}
+
+      {mostrarModalDescuento && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-black uppercase text-white flex items-center gap-2">
+                <Percent className="w-4 h-4 text-sky-400" /> Aplicar Descuento
+              </h3>
+              <button
+                type="button"
+                onClick={() => setMostrarModalDescuento(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={aplicarDescuento} className="space-y-4 text-xs">
+              <div>
+                <label className="block uppercase font-bold text-slate-400 mb-1.5">Tipo de Bonificación</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTipoDescuentoTemp('monto')}
+                    className={`py-2 px-3 rounded-lg border font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                      tipoDescuentoTemp === 'monto'
+                        ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <DollarSign className="w-3.5 h-3.5" /> Monto Fijo ($)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTipoDescuentoTemp('porcentaje')}
+                    className={`py-2 px-3 rounded-lg border font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                      tipoDescuentoTemp === 'porcentaje'
+                        ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <Percent className="w-3.5 h-3.5" /> Porcentaje (%)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block uppercase font-bold text-slate-400 mb-1">
+                  {tipoDescuentoTemp === 'monto' ? 'Monto a descontar ($)' : 'Porcentaje de descuento (%)'}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  autoFocus
+                  required
+                  placeholder={tipoDescuentoTemp === 'monto' ? 'Ej. 20000' : 'Ej. 15'}
+                  value={valorDescuentoTemp}
+                  onChange={(e) => setValorDescuentoTemp(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-sky-500 rounded-lg px-3 py-2 text-sm text-white font-mono font-bold focus:outline-none"
+                />
+              </div>
+
+              {subtotal > 0 && (
+                <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 space-y-1 text-[11px] text-slate-400">
+                  <div className="flex justify-between">
+                    <span>Subtotal actual:</span>
+                    <span className="font-mono text-slate-200">${subtotal.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-emerald-400">
+                    <span>Nuevo total estimado:</span>
+                    <span className="font-mono text-xs">
+                      ${Math.max(
+                        0,
+                        subtotal - (tipoDescuentoTemp === 'porcentaje' 
+                          ? (subtotal * (parseFloat(valorDescuentoTemp) || 0)) / 100 
+                          : (parseFloat(valorDescuentoTemp) || 0))
+                      ).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                {carritoActual.descuentoValor > 0 ? (
+                  <button
+                    type="button"
+                    onClick={quitarDescuento}
+                    className="px-3 py-2 bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500 hover:text-white rounded-lg font-bold transition-colors cursor-pointer"
+                  >
+                    Quitar
+                  </button>
+                ) : <div />}
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMostrarModalDescuento(false)}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-lg cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black rounded-lg uppercase tracking-wider cursor-pointer"
+                  >
+                    Aplicar
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -820,7 +996,6 @@ export const PosView = () => {
         </div>
       )}
 
-      {/* Modal Historial de Ventas del Turno (Para Vendedor - Solo Lectura) */}
       {mostrarModalHistorial && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-4">
