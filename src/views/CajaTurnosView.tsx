@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { DollarSign, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { DollarSign, ArrowDownCircle, ArrowUpCircle, User } from 'lucide-react';
 
 export const CajaTurnosView = () => {
   const { perfil, sucursalActiva, cajaActiva, recargarCajaActiva } = useAuth();
@@ -13,12 +13,33 @@ export const CajaTurnosView = () => {
   const [tipoGasto, setTipoGasto] = useState<'egreso' | 'ingreso_extra'>('egreso');
   const [montoDeclarado, setMontoDeclarado] = useState('');
   const [arqueoCerrado, setArqueoCerrado] = useState<any | null>(null);
+  const [responsableApertura, setResponsableApertura] = useState<{ nombre: string; rol?: string } | null>(null);
 
   useEffect(() => {
     if (cajaActiva) {
       cargarMovimientos();
+      cargarResponsableCaja();
+    } else {
+      setResponsableApertura(null);
     }
   }, [cajaActiva]);
+
+  const cargarResponsableCaja = async () => {
+    if (!cajaActiva?.vendedor_id) return;
+    const { data } = await supabase
+      .from('perfiles')
+      .select('nombre, apellido, rol')
+      .eq('id', cajaActiva.vendedor_id)
+      .maybeSingle();
+
+    if (data) {
+      const nombreCompleto = [data.nombre, data.apellido].filter(Boolean).join(' ');
+      setResponsableApertura({
+        nombre: nombreCompleto,
+        rol: data.rol
+      });
+    }
+  };
 
   const cargarMovimientos = async () => {
     if (!cajaActiva) return;
@@ -173,6 +194,23 @@ export const CajaTurnosView = () => {
                 <div className="text-right">
                   <p className="text-xs text-slate-400">Fondo Inicial</p>
                   <p className="text-xl font-bold text-emerald-400">${Number(cajaActiva.monto_inicial_efectivo).toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5 text-slate-400">
+                  <User className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span>Abierta por:</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-white">
+                    {responsableApertura ? responsableApertura.nombre : (perfil?.nombre || 'Cargando...')}
+                  </span>
+                  {responsableApertura?.rol && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-sky-400 border border-slate-700">
+                      {responsableApertura.rol}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
