@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { DollarSign, ArrowDownCircle, ArrowUpCircle, User } from 'lucide-react';
+import { DollarSign, ArrowDownCircle, ArrowUpCircle, User, CreditCard } from 'lucide-react';
 
 export const CajaTurnosView = () => {
   const { perfil, sucursalActiva, cajaActiva, recargarCajaActiva } = useAuth();
@@ -11,6 +11,7 @@ export const CajaTurnosView = () => {
   const [montoGasto, setMontoGasto] = useState('');
   const [motivoGasto, setMotivoGasto] = useState('');
   const [tipoGasto, setTipoGasto] = useState<'egreso' | 'ingreso_extra'>('egreso');
+  const [metodoPagoMovimiento, setMetodoPagoMovimiento] = useState<'efectivo' | 'transferencia' | 'debito' | 'credito'>('efectivo');
   const [montoDeclarado, setMontoDeclarado] = useState('');
   const [arqueoCerrado, setArqueoCerrado] = useState<any | null>(null);
   const [responsableApertura, setResponsableApertura] = useState<{ nombre: string; rol?: string } | null>(null);
@@ -80,6 +81,7 @@ export const CajaTurnosView = () => {
     const { error } = await supabase.from('movimientos_caja_chica').insert({
       caja_turno_id: cajaActiva.id,
       tipo: tipoGasto,
+      metodo_pago: metodoPagoMovimiento,
       monto: parseFloat(montoGasto),
       motivo: motivoGasto
     });
@@ -89,6 +91,7 @@ export const CajaTurnosView = () => {
     } else {
       setMontoGasto('');
       setMotivoGasto('');
+      setMetodoPagoMovimiento('efectivo');
       cargarMovimientos();
     }
   };
@@ -111,15 +114,15 @@ export const CajaTurnosView = () => {
       }
     });
 
-    const sumaIngresosExtra = movimientos
-      .filter((m) => m.tipo === 'ingreso_extra')
+    const sumaIngresosExtraEfectivo = movimientos
+      .filter((m) => m.tipo === 'ingreso_extra' && (m.metodo_pago === 'efectivo' || !m.metodo_pago))
       .reduce((acc, m) => acc + Number(m.monto), 0);
 
-    const sumaEgresos = movimientos
-      .filter((m) => m.tipo === 'egreso')
+    const sumaEgresosEfectivo = movimientos
+      .filter((m) => m.tipo === 'egreso' && (m.metodo_pago === 'efectivo' || !m.metodo_pago))
       .reduce((acc, m) => acc + Number(m.monto), 0);
 
-    const esperado = Number(cajaActiva.monto_inicial_efectivo) + ventasEfectivo + sumaIngresosExtra - sumaEgresos;
+    const esperado = Number(cajaActiva.monto_inicial_efectivo) + ventasEfectivo + sumaIngresosExtraEfectivo - sumaEgresosEfectivo;
     const declarado = parseFloat(montoDeclarado);
     const dif = declarado - esperado;
 
@@ -244,6 +247,28 @@ export const CajaTurnosView = () => {
                   </button>
                 </div>
 
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1 flex items-center gap-1">
+                    <CreditCard className="w-3 h-3 text-sky-400" /> Medio de Pago / Canal
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['efectivo', 'transferencia', 'debito', 'credito'] as const).map((mp) => (
+                      <button
+                        key={mp}
+                        type="button"
+                        onClick={() => setMetodoPagoMovimiento(mp)}
+                        className={`py-1.5 px-2 rounded-lg border text-xs font-bold capitalize transition-colors cursor-pointer ${
+                          metodoPagoMovimiento === mp
+                            ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-sm'
+                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}
+                      >
+                        {mp === 'transferencia' ? 'MP / Transf.' : mp}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <input
                   type="number"
                   step="0.01"
@@ -257,7 +282,7 @@ export const CajaTurnosView = () => {
                 <input
                   type="text"
                   required
-                  placeholder="Motivo (ej. Cinta, Bolsas, Limpieza, Viáticos)"
+                  placeholder="Motivo (ej. Cinta, Bolsas, Limpieza, Viáticos, Prenda extra)"
                   value={motivoGasto}
                   onChange={(e) => setMotivoGasto(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
@@ -281,12 +306,17 @@ export const CajaTurnosView = () => {
                   <p className="text-xs text-slate-500">No hay movimientos registrados en este turno.</p>
                 ) : (
                   movimientos.map((m) => (
-                    <div key={m.id} className="flex justify-between items-center text-xs p-2 bg-slate-950 rounded border border-slate-800">
+                    <div key={m.id} className="flex justify-between items-center text-xs p-2.5 bg-slate-950 rounded-lg border border-slate-800">
                       <div>
-                        <p className="font-semibold text-slate-200">{m.motivo}</p>
-                        <p className="text-slate-500">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} hs</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-semibold text-slate-200">{m.motivo}</p>
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase bg-slate-900 text-sky-400 border border-slate-800">
+                            {m.metodo_pago === 'transferencia' ? 'MP / Transf.' : (m.metodo_pago || 'efectivo')}
+                          </span>
+                        </div>
+                        <p className="text-slate-500 text-[11px] mt-0.5">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} hs</p>
                       </div>
-                      <span className={`font-bold ${m.tipo === 'egreso' ? 'text-rose-400' : 'text-emerald-400'}`}>
+                      <span className={`font-bold font-mono text-sm ${m.tipo === 'egreso' ? 'text-rose-400' : 'text-emerald-400'}`}>
                         {m.tipo === 'egreso' ? '-' : '+'}${Number(m.monto).toLocaleString()}
                       </span>
                     </div>
