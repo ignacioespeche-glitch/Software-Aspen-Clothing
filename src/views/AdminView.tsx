@@ -20,7 +20,8 @@ import {
   ExternalLink,
   ArrowLeftRight,
   Search,
-  Calendar
+  Calendar,
+  WalletCards
 } from 'lucide-react';
 
 const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
@@ -47,6 +48,7 @@ export const AdminView = () => {
   const [productosConStock, setProductosConStock] = useState<any[]>([]);
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [todosLosTraspasos, setTodosLosTraspasos] = useState<any[]>([]);
+  const [turnosCaja, setTurnosCaja] = useState<any[]>([]);
 
   const [busquedaMatrizStock, setBusquedaMatrizStock] = useState<string>('');
 
@@ -164,6 +166,24 @@ export const AdminView = () => {
         setTodosLosTraspasos(traspasosData);
       }
     }
+
+    let queryTurnos = supabase
+      .from('cajas_turnos')
+      .select(`
+        *,
+        sucursales (nombre),
+        usuario_apertura:vendedor_id (nombre, apellido),
+        usuario_cierre:usuario_cierre_id (nombre, apellido)
+      `)
+      .order('fecha_apertura', { ascending: false })
+      .limit(50);
+
+    if (filtroSucursal !== 'todas') {
+      queryTurnos = queryTurnos.eq('sucursal_id', filtroSucursal);
+    }
+
+    const { data: turnosData } = await queryTurnos;
+    if (turnosData) setTurnosCaja(turnosData);
   };
 
   const handleCambiarEstadoUsuario = async (userId: string, nuevoEstado: boolean) => {
@@ -386,6 +406,103 @@ export const AdminView = () => {
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+        <div>
+          <h2 className="text-base font-bold text-white flex items-center gap-2">
+            <WalletCards className="w-5 h-5 text-emerald-400" />
+            Auditoría de Cajas & Turnos
+          </h2>
+          <p className="text-xs text-slate-400">
+            Registro histórico de aperturas, cierres, responsables de turno y arqueo ciego.
+          </p>
+        </div>
+
+        <div className="overflow-x-auto border border-slate-800 rounded-lg">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-950 text-slate-400 uppercase font-bold">
+              <tr>
+                <th className="px-4 py-3">Fecha</th>
+                <th className="px-3 py-3">Sucursal</th>
+                <th className="px-3 py-3">Apertura</th>
+                <th className="px-3 py-3">Abierta Por</th>
+                <th className="px-3 py-3 text-right">Fondo Inicial</th>
+                <th className="px-3 py-3">Cierre</th>
+                <th className="px-3 py-3">Cerrada Por</th>
+                <th className="px-3 py-3 text-right">Declarado</th>
+                <th className="px-3 py-3 text-right">Diferencia</th>
+                <th className="px-3 py-3 text-center">Estado</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {turnosCaja.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="text-center py-6 text-slate-500">
+                    No hay turnos de caja registrados.
+                  </td>
+                </tr>
+              ) : (
+                turnosCaja.map((t) => {
+                  const dif = Number(t.diferencia || 0);
+                  const abrio = t.usuario_apertura ? `${t.usuario_apertura.nombre} ${t.usuario_apertura.apellido || ''}` : 'Operador';
+                  const cerro = t.usuario_cierre ? `${t.usuario_cierre.nombre} ${t.usuario_cierre.apellido || ''}` : (t.estado === 'cerrada' ? abrio : '-');
+
+                  return (
+                    <tr key={t.id} className="hover:bg-slate-800/30">
+                      <td className="px-4 py-3 font-mono text-slate-300">
+                        {new Date(t.fecha_apertura).toLocaleDateString()}
+                      </td>
+                      <td className="px-3 py-3 font-medium text-slate-200">
+                        {t.sucursales?.nombre}
+                      </td>
+                      <td className="px-3 py-3 font-mono text-slate-400">
+                        {new Date(t.fecha_apertura).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} hs
+                      </td>
+                      <td className="px-3 py-3 font-semibold text-sky-400">
+                        {abrio}
+                      </td>
+                      <td className="px-3 py-3 text-right font-mono font-bold text-slate-200">
+                        ${Number(t.monto_inicial_efectivo).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-3 font-mono text-slate-400">
+                        {t.fecha_cierre 
+                          ? `${new Date(t.fecha_cierre).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} hs` 
+                          : '-'}
+                      </td>
+                      <td className="px-3 py-3 font-semibold text-slate-300">
+                        {cerro}
+                      </td>
+                      <td className="px-3 py-3 text-right font-mono font-bold text-slate-200">
+                        {t.monto_cierre_declarado !== null && t.monto_cierre_declarado !== undefined 
+                          ? `$${Number(t.monto_cierre_declarado).toLocaleString()}` 
+                          : '-'}
+                      </td>
+                      <td className="px-3 py-3 text-right font-mono font-bold">
+                        {t.estado === 'cerrada' ? (
+                          <span className={dif < 0 ? 'text-rose-400' : dif > 0 ? 'text-sky-400' : 'text-emerald-400'}>
+                            {dif === 0 ? '$0' : `${dif > 0 ? '+' : ''}$${dif.toLocaleString()}`}
+                          </span>
+                        ) : (
+                          <span className="text-slate-600">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          t.estado === 'abierta'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 animate-pulse'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        }`}>
+                          {t.estado}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
           <div>
             <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -484,7 +601,8 @@ export const AdminView = () => {
                 ventasFiltradasHistorial.map((v) => (
                   <tr key={v.id} className="hover:bg-slate-800/30">
                     <td className="px-4 py-3 font-mono text-slate-300">
-                      {new Date(v.created_at).toLocaleDateString()} • {new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} hs
+                      {new Date(v.created_at).toLocaleDateString()}{' '}
+                      {new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} hs
                     </td>
                     <td className="px-3 py-3 font-medium text-slate-300">
                       {v.sucursales?.nombre}
@@ -564,7 +682,8 @@ export const AdminView = () => {
                 todosLosTraspasos.map((t) => (
                   <tr key={t.id} className="hover:bg-slate-800/30">
                     <td className="px-4 py-3 font-mono text-slate-300">
-                      {new Date(t.created_at).toLocaleDateString()} • {new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} hs
+                      {new Date(t.created_at).toLocaleDateString()}{' '}
+                      {new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} hs
                     </td>
                     <td className="px-3 py-3 font-bold text-white">
                       {t.sucursal_origen?.nombre}
@@ -587,7 +706,7 @@ export const AdminView = () => {
                     <td className="px-3 py-3 text-slate-300">
                       {t.traspasos_detalle?.map((d: any, idx: number) => (
                         <span key={idx}>
-                          {d.variantes?.productos?.nombre} ({d.variantes?.color} • Talle {d.variantes?.talles_catalogo?.etiqueta})
+                          {d.variantes?.productos?.nombre} ({d.variantes?.color} - Talle {d.variantes?.talles_catalogo?.etiqueta})
                         </span>
                       ))}
                     </td>
@@ -1000,7 +1119,7 @@ export const AdminView = () => {
                     <div>
                       <p className="font-bold text-white">{d.variantes?.productos?.nombre}</p>
                       <p className="text-[11px] text-slate-400">
-                        {d.variantes?.color} • Talle {d.variantes?.talles_catalogo?.etiqueta} (×{d.cantidad})
+                        {d.variantes?.color} - Talle {d.variantes?.talles_catalogo?.etiqueta} (×{d.cantidad})
                       </p>
                     </div>
                     <span className="font-mono font-bold text-slate-200">

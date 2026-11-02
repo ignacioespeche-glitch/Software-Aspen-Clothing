@@ -130,7 +130,8 @@ export const CajaTurnosView = () => {
         monto_cierre_declarado: declarado,
         monto_cierre_esperado: esperado,
         diferencia: dif,
-        estado: 'cerrada'
+        estado: 'cerrada',
+        usuario_cierre_id: perfil?.id || null
       })
       .eq('id', cajaActiva.id);
 
