@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import type { Categoria } from '../types/database';
+import type { Categoria, } from '../types/database';
 import { 
   Boxes, 
   Plus, 
@@ -23,7 +23,7 @@ interface TalleCatalogo {
 }
 
 export const CatalogoStockView = () => {
-  const { sucursalActiva } = useAuth();
+  const { perfil, sucursalActiva } = useAuth();
 
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [talles, setTalles] = useState<TalleCatalogo[]>([]);
@@ -57,21 +57,27 @@ export const CatalogoStockView = () => {
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'exito'; texto: string } | null>(null);
 
+  const sucursalEfectivaId = perfil?.rol === 'admin' 
+    ? (sucursalActiva?.id || perfil?.sucursal_id) 
+    : (perfil?.sucursal_id || sucursalActiva?.id);
+
+  const sucursalEfectivaNombre = sucursalActiva?.nombre || 'Sucursal Asignada';
+
   useEffect(() => {
     cargarDatosMaestros();
   }, []);
 
   useEffect(() => {
-    if (sucursalActiva) {
+    if (sucursalEfectivaId) {
       cargarProductos();
     }
-  }, [sucursalActiva]);
+  }, [sucursalEfectivaId]);
 
   useEffect(() => {
-    if (productoSeleccionado && sucursalActiva) {
+    if (productoSeleccionado && sucursalEfectivaId) {
       cargarMatrizValores(productoSeleccionado);
     }
-  }, [productoSeleccionado, sucursalActiva]);
+  }, [productoSeleccionado, sucursalEfectivaId]);
 
   const cargarDatosMaestros = async () => {
     const [resCat, resTalles] = await Promise.all([
@@ -94,11 +100,19 @@ export const CatalogoStockView = () => {
   };
 
   const cargarProductos = async () => {
+    if (!sucursalEfectivaId) return;
+
     const { data } = await supabase
       .from('productos')
       .select(`
         *,
         categorias (id, nombre),
+        productos_precios_sucursal (
+          id,
+          sucursal_id,
+          precio_costo,
+          precio_venta
+        ),
         variantes (
           id,
           color,
@@ -124,10 +138,21 @@ export const CatalogoStockView = () => {
     }
   };
 
+  const obtenerPreciosSucursal = (prod: any) => {
+    const precioEspecifico = prod?.productos_precios_sucursal?.find(
+      (ps: any) => ps.sucursal_id === sucursalEfectivaId
+    );
+
+    return {
+      costo: precioEspecifico ? Number(precioEspecifico.precio_costo) : Number(prod?.precio_costo || 0),
+      venta: precioEspecifico ? Number(precioEspecifico.precio_venta) : Number(prod?.precio_venta || 0)
+    };
+  };
+
   const cargarMatrizValores = (prod: any) => {
     const mapa: { [key: string]: number } = {};
     prod.variantes?.forEach((v: any) => {
-      const stock = v.stock_sucursal?.find((s: any) => s.sucursal_id === sucursalActiva?.id)?.cantidad || 0;
+      const stock = v.stock_sucursal?.find((s: any) => s.sucursal_id === sucursalEfectivaId)?.cantidad || 0;
       mapa[v.id] = stock;
     });
     setMatrizValores(mapa);
@@ -175,6 +200,11 @@ export const CatalogoStockView = () => {
     setErrorModal(null);
     setMensaje(null);
 
+    if (!sucursalEfectivaId) {
+      setErrorModal('No se detectó la sucursal asignada del usuario.');
+      return;
+    }
+
     if (!nuevoNombre.trim() || !nuevaCategoriaId || !nuevoCosto || !nuevoPrecioVenta) {
       setErrorModal('Completá todos los campos del producto.');
       return;
@@ -188,45 +218,79 @@ export const CatalogoStockView = () => {
     setCreandoProducto(true);
 
     try {
-      const { data: prodData, error: prodErr } = await supabase
+      const { data: existente } = await supabase
         .from('productos')
-        .insert({
-          nombre: nuevoNombre.trim(),
-          categoria_id: nuevaCategoriaId,
+        .select('*')
+        .ilike('nombre', nuevoNombre.trim())
+        .maybeSingle();
+
+      let prodData = existente;
+
+      if (!prodData) {
+        const { data: nuevo, error: prodErr } = await supabase
+          .from('productos')
+          .insert({
+            nombre: nuevoNombre.trim(),
+            categoria_id: nuevaCategoriaId,
+            precio_costo: parseFloat(nuevoCosto),
+            precio_venta: parseFloat(nuevoPrecioVenta),
+            activo: true
+          })
+          .select()
+          .single();
+
+        if (prodErr) throw prodErr;
+        prodData = nuevo;
+      }
+
+      await supabase
+        .from('productos_precios_sucursal')
+        .upsert({
+          producto_id: prodData.id,
+          sucursal_id: sucursalEfectivaId,
           precio_costo: parseFloat(nuevoCosto),
           precio_venta: parseFloat(nuevoPrecioVenta),
-          activo: true
-        })
-        .select()
-        .single();
-
-      if (prodErr) throw prodErr;
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'producto_id,sucursal_id' });
 
       const tallesACrear = talles.filter((t) => tallesSeleccionadosIds.includes(t.id));
       const colorInicial = 'Negro';
 
       for (const t of tallesACrear) {
-        const skuGenerado = `${prodData.nombre.replace(/\s+/g, '').substring(0, 4).toUpperCase()}-${colorInicial.substring(0, 3).toUpperCase()}-${t.etiqueta}-${Date.now().toString().slice(-4)}`;
-
-        const { data: varData, error: varErr } = await supabase
+        let { data: varExistente } = await supabase
           .from('variantes')
-          .insert({
-            producto_id: prodData.id,
-            talle_id: t.id,
-            color: colorInicial,
-            sku_interno: skuGenerado
-          })
-          .select()
-          .single();
+          .select('*')
+          .eq('producto_id', prodData.id)
+          .eq('talle_id', t.id)
+          .ilike('color', colorInicial)
+          .maybeSingle();
 
-        if (varErr) throw varErr;
+        if (!varExistente) {
+          const skuGenerado = `${prodData.nombre.replace(/\s+/g, '').substring(0, 4).toUpperCase()}-${colorInicial.substring(0, 3).toUpperCase()}-${t.etiqueta}-${Date.now().toString().slice(-4)}`;
 
-        if (varData && sucursalActiva) {
-          await supabase.from('stock_sucursal').insert({
-            variante_id: varData.id,
-            sucursal_id: sucursalActiva.id,
-            cantidad: 0
-          });
+          const { data: varNueva, error: varErr } = await supabase
+            .from('variantes')
+            .insert({
+              producto_id: prodData.id,
+              talle_id: t.id,
+              color: colorInicial,
+              sku_interno: skuGenerado
+            })
+            .select()
+            .single();
+
+          if (varErr) throw varErr;
+          varExistente = varNueva;
+        }
+
+        if (varExistente) {
+          await supabase
+            .from('stock_sucursal')
+            .upsert({
+              variante_id: varExistente.id,
+              sucursal_id: sucursalEfectivaId,
+              cantidad: 0
+            }, { onConflict: 'variante_id,sucursal_id' });
         }
       }
 
@@ -236,7 +300,7 @@ export const CatalogoStockView = () => {
       setNuevoPrecioVenta('');
       await cargarProductos();
       setProductoSeleccionado(prodData);
-      setMensaje({ tipo: 'exito', texto: '¡Prenda creada exitosamente con los talles elegidos!' });
+      setMensaje({ tipo: 'exito', texto: `¡Prenda registrada para ${sucursalEfectivaNombre}!` });
     } catch (err: any) {
       setErrorModal(err.message || 'Error al guardar en la base de datos.');
     } finally {
@@ -246,36 +310,49 @@ export const CatalogoStockView = () => {
 
   const abrirModalEditar = () => {
     if (!productoSeleccionado) return;
+    const precios = obtenerPreciosSucursal(productoSeleccionado);
     setEditNombre(productoSeleccionado.nombre);
     setEditCategoriaId(productoSeleccionado.categoria_id);
-    setEditCosto(productoSeleccionado.precio_costo.toString());
-    setEditPrecioVenta(productoSeleccionado.precio_venta.toString());
+    setEditCosto(precios.costo.toString());
+    setEditPrecioVenta(precios.venta.toString());
     setMostrarModalEditar(true);
   };
 
   const handleGuardarEdicion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!productoSeleccionado) return;
+    if (!productoSeleccionado || !sucursalEfectivaId) return;
 
     setGuardandoEdicion(true);
     setMensaje(null);
 
     try {
-      const { error } = await supabase
-        .from('productos')
-        .update({
-          nombre: editNombre.trim(),
-          categoria_id: editCategoriaId,
-          precio_costo: parseFloat(editCosto),
-          precio_venta: parseFloat(editPrecioVenta)
-        })
-        .eq('id', productoSeleccionado.id);
+      if (perfil?.rol === 'admin') {
+        const { error: errProd } = await supabase
+          .from('productos')
+          .update({
+            nombre: editNombre.trim(),
+            categoria_id: editCategoriaId
+          })
+          .eq('id', productoSeleccionado.id);
 
-      if (error) throw error;
+        if (errProd) throw errProd;
+      }
+
+      const { error: errPrecio } = await supabase
+        .from('productos_precios_sucursal')
+        .upsert({
+          producto_id: productoSeleccionado.id,
+          sucursal_id: sucursalEfectivaId,
+          precio_costo: parseFloat(editCosto),
+          precio_venta: parseFloat(editPrecioVenta),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'producto_id,sucursal_id' });
+
+      if (errPrecio) throw errPrecio;
 
       setMostrarModalEditar(false);
       await cargarProductos();
-      setMensaje({ tipo: 'exito', texto: '¡Datos de la prenda actualizados correctamente!' });
+      setMensaje({ tipo: 'exito', texto: `¡Precios actualizados para ${sucursalEfectivaNombre}!` });
     } catch (err: any) {
       setMensaje({ tipo: 'error', texto: err.message || 'Error actualizando los datos de la prenda.' });
     } finally {
@@ -284,29 +361,45 @@ export const CatalogoStockView = () => {
   };
 
   const handleEliminarProducto = async () => {
-    if (!productoSeleccionado) return;
+    if (!productoSeleccionado || !sucursalEfectivaId) return;
     setEliminandoProducto(true);
     setMensaje(null);
 
     try {
-      const { error: errFisico } = await supabase
-        .from('productos')
+      const varianteIds = (productoSeleccionado.variantes || []).map((v: any) => v.id);
+
+      if (varianteIds.length > 0) {
+        await supabase
+          .from('stock_sucursal')
+          .delete()
+          .in('variante_id', varianteIds)
+          .eq('sucursal_id', sucursalEfectivaId);
+      }
+
+      await supabase
+        .from('productos_precios_sucursal')
         .delete()
-        .eq('id', productoSeleccionado.id);
+        .eq('producto_id', productoSeleccionado.id)
+        .eq('sucursal_id', sucursalEfectivaId);
 
-      if (errFisico) {
-        const { error: errLogico } = await supabase
-          .from('productos')
-          .update({ activo: false })
-          .eq('id', productoSeleccionado.id);
+      if (perfil?.rol === 'admin') {
+        const { count } = await supabase
+          .from('stock_sucursal')
+          .select('*', { count: 'exact', head: true })
+          .in('variante_id', varianteIds);
 
-        if (errLogico) throw errLogico;
+        if (!count || count === 0) {
+          await supabase
+            .from('productos')
+            .update({ activo: false })
+            .eq('id', productoSeleccionado.id);
+        }
       }
 
       setMostrarModalEliminar(false);
       setProductoSeleccionado(null);
       await cargarProductos();
-      setMensaje({ tipo: 'exito', texto: '¡Prenda eliminada del catálogo y percheros!' });
+      setMensaje({ tipo: 'exito', texto: `¡Prenda dada de baja en ${sucursalEfectivaNombre}!` });
     } catch (err: any) {
       setMensaje({ tipo: 'error', texto: err.message || 'Error al eliminar la prenda.' });
     } finally {
@@ -315,7 +408,7 @@ export const CatalogoStockView = () => {
   };
 
   const handleAgregarColor = async () => {
-    if (!productoSeleccionado || !nuevoColor.trim() || !sucursalActiva) return;
+    if (!productoSeleccionado || !nuevoColor.trim() || !sucursalEfectivaId) return;
 
     const colorFormateado = nuevoColor.trim();
     const tallesActualesIds = Array.from(
@@ -325,25 +418,39 @@ export const CatalogoStockView = () => {
     const tallesAptos = talles.filter((t) => tallesActualesIds.includes(t.id));
 
     for (const t of tallesAptos) {
-      const skuGenerado = `${productoSeleccionado.nombre.replace(/\s+/g, '').substring(0, 4).toUpperCase()}-${colorFormateado.substring(0, 3).toUpperCase()}-${t.etiqueta}-${Date.now().toString().slice(-4)}`;
-
-      const { data: varData } = await supabase
+      let { data: varExistente } = await supabase
         .from('variantes')
-        .insert({
-          producto_id: productoSeleccionado.id,
-          talle_id: t.id,
-          color: colorFormateado,
-          sku_interno: skuGenerado
-        })
-        .select()
-        .single();
+        .select('*')
+        .eq('producto_id', productoSeleccionado.id)
+        .eq('talle_id', t.id)
+        .ilike('color', colorFormateado)
+        .maybeSingle();
 
-      if (varData) {
-        await supabase.from('stock_sucursal').insert({
-          variante_id: varData.id,
-          sucursal_id: sucursalActiva.id,
-          cantidad: 0
-        });
+      if (!varExistente) {
+        const skuGenerado = `${productoSeleccionado.nombre.replace(/\s+/g, '').substring(0, 4).toUpperCase()}-${colorFormateado.substring(0, 3).toUpperCase()}-${t.etiqueta}-${Date.now().toString().slice(-4)}`;
+
+        const { data: varData } = await supabase
+          .from('variantes')
+          .insert({
+            producto_id: productoSeleccionado.id,
+            talle_id: t.id,
+            color: colorFormateado,
+            sku_interno: skuGenerado
+          })
+          .select()
+          .single();
+
+        varExistente = varData;
+      }
+
+      if (varExistente) {
+        await supabase
+          .from('stock_sucursal')
+          .upsert({
+            variante_id: varExistente.id,
+            sucursal_id: sucursalEfectivaId,
+            cantidad: 0
+          }, { onConflict: 'variante_id,sucursal_id' });
       }
     }
 
@@ -352,14 +459,14 @@ export const CatalogoStockView = () => {
   };
 
   const handleGuardarStock = async () => {
-    if (!productoSeleccionado || !sucursalActiva) return;
+    if (!productoSeleccionado || !sucursalEfectivaId) return;
     setGuardando(true);
     setMensaje(null);
 
     try {
       for (const variante of productoSeleccionado.variantes || []) {
         const valorInput = matrizValores[variante.id] ?? 0;
-        const stockActual = variante.stock_sucursal?.find((s: any) => s.sucursal_id === sucursalActiva.id)?.cantidad || 0;
+        const stockActual = variante.stock_sucursal?.find((s: any) => s.sucursal_id === sucursalEfectivaId)?.cantidad || 0;
 
         let nuevoStock = valorInput;
         if (modoEdicion === 'sumar') {
@@ -372,13 +479,13 @@ export const CatalogoStockView = () => {
           .from('stock_sucursal')
           .upsert({
             variante_id: variante.id,
-            sucursal_id: sucursalActiva.id,
+            sucursal_id: sucursalEfectivaId,
             cantidad: finalCalculado,
             updated_at: new Date().toISOString()
           }, { onConflict: 'variante_id,sucursal_id' });
       }
 
-      setMensaje({ tipo: 'exito', texto: `¡Stock guardado en ${sucursalActiva.nombre}!` });
+      setMensaje({ tipo: 'exito', texto: `¡Stock guardado en ${sucursalEfectivaNombre}!` });
       await cargarProductos();
     } catch (err: any) {
       setMensaje({ tipo: 'error', texto: err.message || 'Error guardando stock.' });
@@ -409,6 +516,10 @@ export const CatalogoStockView = () => {
   const curvaActualModal = obtenerTipoCurvaPorCategoria(nuevaCategoriaId);
   const tallesDisponiblesModal = talles.filter((t) => t.tipo_curva === curvaActualModal);
 
+  const preciosSeleccionado = productoSeleccionado 
+    ? obtenerPreciosSucursal(productoSeleccionado) 
+    : { costo: 0, venta: 0 };
+
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
@@ -418,7 +529,7 @@ export const CatalogoStockView = () => {
             Catálogo & Matriz de Stock
           </h1>
           <p className="text-sm text-slate-400">
-            Control de inventario por talle y color para <strong className="text-sky-400">{sucursalActiva?.nombre}</strong>
+            Control de inventario y precios exclusivo para <strong className="text-sky-400">{sucursalEfectivaNombre}</strong>
           </p>
         </div>
 
@@ -467,36 +578,43 @@ export const CatalogoStockView = () => {
           </div>
 
           <div className="space-y-1.5 max-h-[600px] overflow-y-auto pr-1">
-            {productosFiltrados.map((prod) => (
-              <div
-                key={prod.id}
-                onClick={() => setProductoSeleccionado(prod)}
-                className={`p-3 rounded-lg border transition-all cursor-pointer ${
-                  productoSeleccionado?.id === prod.id
-                    ? 'bg-sky-500/10 border-sky-500/60 shadow-sm'
-                    : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="font-bold text-white text-xs">{prod.nombre}</h4>
-                    <p className="text-[10px] text-slate-400 uppercase mt-0.5">
-                      {prod.categorias?.nombre}
-                    </p>
-                  </div>
-                  <span className="font-mono font-bold text-emerald-400 text-xs">
-                    ${Number(prod.precio_venta).toLocaleString()}
-                  </span>
-                </div>
+            {productosFiltrados.map((prod) => {
+              const pSucursal = obtenerPreciosSucursal(prod);
+              const margen = pSucursal.costo > 0 
+                ? Math.round(((pSucursal.venta - pSucursal.costo) / pSucursal.costo) * 100) 
+                : 0;
 
-                <div className="mt-2 pt-2 border-t border-slate-900 flex justify-between text-[10px] text-slate-500 font-medium">
-                  <span>Costo: ${Number(prod.precio_costo).toLocaleString()}</span>
-                  <span className="text-sky-400 font-bold">
-                    Margen: +{Math.round(((prod.precio_venta - prod.precio_costo) / prod.precio_costo) * 100)}%
-                  </span>
+              return (
+                <div
+                  key={prod.id}
+                  onClick={() => setProductoSeleccionado(prod)}
+                  className={`p-3 rounded-lg border transition-all cursor-pointer ${
+                    productoSeleccionado?.id === prod.id
+                      ? 'bg-sky-500/10 border-sky-500/60 shadow-sm'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-bold text-white text-xs">{prod.nombre}</h4>
+                      <p className="text-[10px] text-slate-400 uppercase mt-0.5">
+                        {prod.categorias?.nombre}
+                      </p>
+                    </div>
+                    <span className="font-mono font-bold text-emerald-400 text-xs">
+                      ${pSucursal.venta.toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 pt-2 border-t border-slate-900 flex justify-between text-[10px] text-slate-500 font-medium">
+                    <span>Costo ({sucursalEfectivaNombre}): ${pSucursal.costo.toLocaleString()}</span>
+                    <span className="text-sky-400 font-bold">
+                      Margen: +{margen}%
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -513,14 +631,14 @@ export const CatalogoStockView = () => {
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={abrirModalEditar}
-                        title="Editar nombre, costo y precio"
+                        title={`Editar precios para ${sucursalEfectivaNombre}`}
                         className="p-1.5 bg-slate-800 hover:bg-sky-500 hover:text-slate-950 text-slate-300 rounded-lg transition-colors cursor-pointer"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => setMostrarModalEliminar(true)}
-                        title="Eliminar prenda del inventario"
+                        title={`Eliminar prenda de ${sucursalEfectivaNombre}`}
                         className="p-1.5 bg-slate-800 hover:bg-rose-600 hover:text-white text-rose-400 rounded-lg transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -528,9 +646,11 @@ export const CatalogoStockView = () => {
                     </div>
                   </div>
 
-                  <p className="text-xs text-slate-400 mt-1">
-                    Navegá entre casilleros con la tecla <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-slate-300">Tab</kbd>
-                  </p>
+                  <div className="flex gap-4 mt-1 text-xs text-slate-400">
+                    <span>Venta actual: <strong className="text-emerald-400 font-mono">${preciosSeleccionado.venta.toLocaleString()}</strong></span>
+                    <span>Costo taller: <strong className="text-slate-200 font-mono">${preciosSeleccionado.costo.toLocaleString()}</strong></span>
+                    <span className="text-slate-500">Navegá casilleros con <kbd className="px-1 py-0.5 bg-slate-800 rounded text-slate-300">Tab</kbd></span>
+                  </div>
                 </div>
 
                 <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
@@ -631,7 +751,7 @@ export const CatalogoStockView = () => {
                   className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-extrabold px-6 py-2.5 rounded-lg text-xs flex items-center gap-2 uppercase tracking-wider transition-colors cursor-pointer shadow-lg"
                 >
                   <Save className="w-4 h-4" />
-                  {guardando ? 'Guardando...' : `Guardar Stock en ${sucursalActiva?.nombre}`}
+                  {guardando ? 'Guardando...' : `Guardar Stock en ${sucursalEfectivaNombre}`}
                 </button>
               </div>
             </>
@@ -647,9 +767,14 @@ export const CatalogoStockView = () => {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h3 className="text-base font-black uppercase text-white flex items-center gap-2">
-                <Edit2 className="w-4 h-4 text-sky-400" /> Editar Datos de la Prenda
-              </h3>
+              <div>
+                <h3 className="text-base font-black uppercase text-white flex items-center gap-2">
+                  <Edit2 className="w-4 h-4 text-sky-400" /> Editar Precios y Datos
+                </h3>
+                <p className="text-[11px] text-sky-400 font-semibold mt-0.5">
+                  Aplicando únicamente para: {sucursalEfectivaNombre}
+                </p>
+              </div>
               <button
                 onClick={() => setMostrarModalEditar(false)}
                 className="text-slate-400 hover:text-white"
@@ -664,18 +789,20 @@ export const CatalogoStockView = () => {
                 <input
                   type="text"
                   required
+                  disabled={perfil?.rol !== 'admin'}
                   value={editNombre}
                   onChange={(e) => setEditNombre(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-sky-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-sky-500 disabled:opacity-60"
                 />
               </div>
 
               <div>
                 <label className="block uppercase font-bold text-slate-400 mb-1">Categoría</label>
                 <select
+                  disabled={perfil?.rol !== 'admin'}
                   value={editCategoriaId}
                   onChange={(e) => setEditCategoriaId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-sky-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-sky-500 disabled:opacity-60"
                 >
                   {categorias.map((c) => (
                     <option key={c.id} value={c.id}>{c.nombre}</option>
@@ -685,7 +812,7 @@ export const CatalogoStockView = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block uppercase font-bold text-slate-400 mb-1">Costo Compra/Taller ($)</label>
+                  <label className="block uppercase font-bold text-slate-400 mb-1">Costo ({sucursalEfectivaNombre}) ($)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -697,7 +824,7 @@ export const CatalogoStockView = () => {
                 </div>
 
                 <div>
-                  <label className="block uppercase font-bold text-slate-400 mb-1">Precio Venta Mostrador ($)</label>
+                  <label className="block uppercase font-bold text-slate-400 mb-1">Precio Venta ({sucursalEfectivaNombre}) ($)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -723,7 +850,7 @@ export const CatalogoStockView = () => {
                   className="px-5 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black rounded-lg cursor-pointer uppercase tracking-wider transition-colors flex items-center gap-1.5"
                 >
                   {guardandoEdicion && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
+                  {guardandoEdicion ? 'Guardando...' : `Guardar en ${sucursalEfectivaNombre}`}
                 </button>
               </div>
             </form>
@@ -739,10 +866,10 @@ export const CatalogoStockView = () => {
                 <Trash2 className="w-6 h-6" />
               </div>
               <h3 className="text-base font-black uppercase text-white">
-                ¿Eliminar {productoSeleccionado?.nombre}?
+                ¿Bajar {productoSeleccionado?.nombre}?
               </h3>
               <p className="text-xs text-slate-400">
-                Esta acción dará de baja la prenda y sus variantes del catálogo y no estará disponible para nuevas ventas.
+                Se quitará el stock y los precios exclusivamente de <strong className="text-white">{sucursalEfectivaNombre}</strong> sin alterar las demás sucursales.
               </p>
             </div>
 
@@ -761,7 +888,7 @@ export const CatalogoStockView = () => {
                 className="w-1/2 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-lg cursor-pointer uppercase tracking-wider text-xs transition-colors flex items-center justify-center gap-1.5"
               >
                 {eliminandoProducto && <Loader2 className="w-4 h-4 animate-spin" />}
-                {eliminandoProducto ? 'Borrando...' : 'Sí, Eliminar'}
+                {eliminandoProducto ? 'Borrando...' : 'Sí, Quitar'}
               </button>
             </div>
           </div>
@@ -773,10 +900,10 @@ export const CatalogoStockView = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
             <div className="border-b border-slate-800 pb-3">
               <h3 className="text-base font-black uppercase text-white">
-                Crear Nuevo Producto Padre
+                Crear / Asignar Prenda
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Elegí la categoría y tildá únicamente los talles que llegaron en esta tanda.
+                Se creará o asociará la prenda definiendo stock y precios para <strong className="text-sky-400">{sucursalEfectivaNombre}</strong>.
               </p>
             </div>
 
@@ -816,7 +943,7 @@ export const CatalogoStockView = () => {
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="uppercase font-bold text-slate-400">
-                    Talles Disponibles para esta Prenda ({tallesSeleccionadosIds.length} seleccionados)
+                    Talles Disponibles ({tallesSeleccionadosIds.length} seleccionados)
                   </label>
                   {curvaActualModal !== 'unico' && (
                     <button
@@ -868,7 +995,7 @@ export const CatalogoStockView = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block uppercase font-bold text-slate-400 mb-1">Costo Compra/Taller ($)</label>
+                  <label className="block uppercase font-bold text-slate-400 mb-1">Costo ({sucursalEfectivaNombre}) ($)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -881,7 +1008,7 @@ export const CatalogoStockView = () => {
                 </div>
 
                 <div>
-                  <label className="block uppercase font-bold text-slate-400 mb-1">Precio Venta Mostrador ($)</label>
+                  <label className="block uppercase font-bold text-slate-400 mb-1">Precio Venta ({sucursalEfectivaNombre}) ($)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -909,7 +1036,7 @@ export const CatalogoStockView = () => {
                   className="px-5 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black rounded-lg cursor-pointer uppercase tracking-wider transition-colors shadow-md flex items-center gap-1.5 disabled:opacity-50"
                 >
                   {creandoProducto && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {creandoProducto ? 'Creando Prenda...' : 'Crear y Continuar a Matriz'}
+                  {creandoProducto ? 'Guardando...' : `Registrar en ${sucursalEfectivaNombre}`}
                 </button>
               </div>
             </form>

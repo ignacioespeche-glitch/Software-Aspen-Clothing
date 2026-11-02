@@ -36,16 +36,27 @@ export interface TalleCatalogo {
   orden: number;
 }
 
+export interface ProductoPrecioSucursal {
+  id: string;
+  producto_id: string;
+  sucursal_id: string;
+  precio_costo: number;
+  precio_venta: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Producto {
   id: string;
   categoria_id: string;
-  curva_talles_id: string;
+  curva_talles_id?: string;
   nombre: string;
   descripcion?: string;
   precio_costo: number;
   precio_venta: number;
   activo: boolean;
   created_at: string;
+  productos_precios_sucursal?: ProductoPrecioSucursal[];
 }
 
 export interface Variante {
