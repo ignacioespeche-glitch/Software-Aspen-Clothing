@@ -17,7 +17,8 @@ import {
   ExternalLink,
   Percent,
   DollarSign,
-  X
+  X,
+  Send
 } from 'lucide-react';
 
 interface CarritoItem {
@@ -68,7 +69,16 @@ export const PosView = () => {
   const [errorCobro, setErrorCobro] = useState<string | null>(null);
   const [mensajePos, setMensajePos] = useState<string | null>(null);
 
-  const [toastExito, setToastExito] = useState<{ mostrar: boolean; monto: number; ventaId?: string; offline?: boolean } | null>(null);
+  const [toastExito, setToastExito] = useState<{
+    mostrar: boolean;
+    monto: number;
+    ventaId?: string;
+    offline?: boolean;
+    clienteNombre?: string;
+    clienteTelefono?: string;
+  } | null>(null);
+
+  const [telInputToast, setTelInputToast] = useState('');
 
   const [mostrarModalHistorial, setMostrarModalHistorial] = useState(false);
   const [ventasTurno, setVentasTurno] = useState<any[]>([]);
@@ -318,6 +328,9 @@ export const PosView = () => {
     const { data: sessionData } = await supabase.auth.getSession();
     const idVendedorReal = perfil?.id || sessionData?.session?.user?.id || null;
 
+    const clienteGuardadoNombre = nombreCliente.trim();
+    const clienteGuardadoTelefono = telefonoCliente.trim();
+
     if (!navigator.onLine) {
       await guardarVentaOffline({
         sucursal_id: sucursalActiva.id,
@@ -343,6 +356,8 @@ export const PosView = () => {
         mostrar: true,
         monto: totalFinal,
         offline: true,
+        clienteNombre: clienteGuardadoNombre,
+        clienteTelefono: clienteGuardadoTelefono
       });
 
       limpiarFormularioVenta();
@@ -351,13 +366,13 @@ export const PosView = () => {
 
     try {
       let clienteId: string | null = null;
-      if (telefonoCliente.trim()) {
+      if (clienteGuardadoTelefono) {
         const { data: clienteData, error: cErr } = await supabase
           .from('clientes')
           .upsert(
             {
-              telefono_whatsapp: telefonoCliente.trim(),
-              nombre: nombreCliente.trim() || 'Cliente Mostrador'
+              telefono_whatsapp: clienteGuardadoTelefono,
+              nombre: clienteGuardadoNombre || 'Cliente Mostrador'
             },
             { onConflict: 'telefono_whatsapp' }
           )
@@ -419,8 +434,11 @@ export const PosView = () => {
         monto: totalFinal,
         ventaId: ventaData.id,
         offline: false,
+        clienteNombre: clienteGuardadoNombre,
+        clienteTelefono: clienteGuardadoTelefono
       });
 
+      setTelInputToast(clienteGuardadoTelefono);
       limpiarFormularioVenta();
       cargarCatalogoPOS();
     } catch (err: any) {
@@ -435,23 +453,28 @@ export const PosView = () => {
     setMostrarModalCobro(false);
     setMontoEfectivoMixto('');
     setMontoDigitalMixto('');
-    setTimeout(() => setToastExito(null), 5000);
+    setNombreCliente('');
+    setTelefonoCliente('');
   };
 
-  const enviarWhatsAppComprobante = () => {
-    if (!telefonoCliente.trim() || !toastExito) return;
+  const enviarWhatsAppComprobante = (numeroDestino?: string) => {
+    const telefonoFinal = numeroDestino || toastExito?.clienteTelefono;
+    if (!telefonoFinal || !telefonoFinal.trim() || !toastExito) return;
 
-    let tel = telefonoCliente.replace(/\D/g, '');
+    let tel = telefonoFinal.replace(/\D/g, '');
     if (!tel.startsWith('549')) {
       tel = `549${tel}`;
     }
 
     const linkComprobante = `${window.location.origin}/ticket/${toastExito.ventaId}`;
+    const nombreParaMensaje = toastExito.clienteNombre || 'genio/a';
 
     const mensaje = encodeURIComponent(
-      `¡Hola ${nombreCliente || 'Genio/a'}! Gracias por comprar en *Aspen Clothing* (${sucursalActiva?.nombre}).\n\n` +
-      `Tu compra por un total de *$${toastExito.monto.toLocaleString()}* quedó confirmada.\n\n` +
-      `Podés consultar tu ticket digital y políticas de cambio en este link:\n${linkComprobante}`
+      `BUENASSS ${nombreParaMensaje.toUpperCase()}! 👋\n` +
+      `Somos del equipo de *ASPEN CLOTHING* (${sucursalActiva?.nombre}).\n\n` +
+      `¡Te enviamos tu comprobante de compra por un total de *$${toastExito.monto.toLocaleString()}*!\n\n` +
+      `Podés consultar tu ticket digital y las políticas de cambio ingresando acá:\n${linkComprobante}\n\n` +
+      `¡Muchas gracias por elegirnos!`
     );
 
     window.open(`https://wa.me/${tel}?text=${mensaje}`, '_blank');
@@ -466,25 +489,60 @@ export const PosView = () => {
   return (
     <div className="max-w-7xl mx-auto p-4 flex flex-col lg:flex-row gap-6 relative">
       {toastExito?.mostrar && (
-        <div className="fixed top-20 right-6 z-50 bg-slate-900 border-2 border-emerald-500 text-white p-4 rounded-xl shadow-2xl flex items-center gap-4 animate-bounce">
-          <div className="animate-[spin_0.6s_ease-out_1] text-emerald-400">
-            <CheckCircle className="w-8 h-8" />
-          </div>
-          <div>
-            <h4 className="font-black text-sm text-emerald-400">
-              {toastExito.offline ? '¡Venta Registrada Offline!' : '¡Venta registrada con éxito!'}
-            </h4>
-            <p className="text-xs text-slate-300">
-              {toastExito.offline ? 'Guardada en memoria local. Se sincronizará al volver la red.' : `Cobrado: $${toastExito.monto.toLocaleString()}`}
-            </p>
-          </div>
-          {telefonoCliente && !toastExito.offline && (
+        <div className="fixed top-20 right-4 sm:right-6 z-50 bg-slate-900 border-2 border-emerald-500 text-white p-4 rounded-2xl shadow-2xl flex flex-col gap-3 max-w-sm sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="text-emerald-400 shrink-0">
+                <CheckCircle className="w-7 h-7" />
+              </div>
+              <div>
+                <h4 className="font-black text-sm text-emerald-400">
+                  {toastExito.offline ? '¡Venta Registrada Offline!' : '¡Venta registrada con éxito!'}
+                </h4>
+                <p className="text-xs text-slate-300">
+                  {toastExito.offline 
+                    ? 'Guardada en memoria local. Se sincronizará al volver la red.' 
+                    : `Cobrado: $${toastExito.monto.toLocaleString()}${toastExito.clienteNombre ? ` • ${toastExito.clienteNombre}` : ''}`}
+                </p>
+              </div>
+            </div>
             <button
-              onClick={enviarWhatsAppComprobante}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer font-bold ml-2"
+              onClick={() => setToastExito(null)}
+              className="text-slate-400 hover:text-white p-1"
             >
-              <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
+              <X className="w-4 h-4" />
             </button>
+          </div>
+
+          {!toastExito.offline && toastExito.ventaId && (
+            <div className="pt-2 border-t border-slate-800">
+              {toastExito.clienteTelefono ? (
+                <button
+                  onClick={() => enviarWhatsAppComprobante()}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-md transition-colors"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  Enviar Comprobante por WhatsApp ({toastExito.clienteTelefono})
+                </button>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Número de WhatsApp (ej. 2634404400)"
+                    value={telInputToast}
+                    onChange={(e) => setTelInputToast(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={() => enviarWhatsAppComprobante(telInputToast)}
+                    disabled={!telInputToast.trim()}
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Send className="w-3.5 h-3.5" /> Enviar
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
