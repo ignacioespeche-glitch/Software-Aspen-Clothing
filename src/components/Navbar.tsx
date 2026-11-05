@@ -20,15 +20,22 @@ import {
 } from 'lucide-react';
 
 export const Navbar = () => {
-  const { perfil, sucursalActiva, setSucursalActiva, cajaActiva, cerrarSesion } = useAuth();
+  const { perfil, empresa, sucursalActiva, setSucursalActiva, cajaActiva, cerrarSesion } = useAuth();
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [online, setOnline] = useState(navigator.onLine);
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
 
   useEffect(() => {
-    supabase.from('sucursales').select('*').order('nombre').then(({ data }) => {
-      if (data) setSucursales(data as Sucursal[]);
-    });
+    if (empresa?.id) {
+      supabase
+        .from('sucursales')
+        .select('*')
+        .eq('empresa_id', empresa.id)
+        .order('nombre')
+        .then(({ data }) => {
+          if (data) setSucursales(data as Sucursal[]);
+        });
+    }
 
     const handleOnline = () => setOnline(true);
     const handleOffline = () => setOnline(false);
@@ -40,11 +47,11 @@ export const Navbar = () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [empresa?.id]);
 
   const esAdmin = perfil?.rol === 'admin';
-
   const cerrarMenu = () => setMenuMovilAbierto(false);
+  const nombreMarca = empresa?.nombre?.toUpperCase() || 'SISTEMA POS';
 
   return (
     <>
@@ -60,7 +67,7 @@ export const Navbar = () => {
           </button>
 
           <div className="flex items-center gap-1.5">
-            <span className="font-black text-sm md:text-base tracking-widest text-white">ASPEN</span>
+            <span className="font-black text-sm md:text-base tracking-widest text-white">{nombreMarca}</span>
             <span className="text-[9px] md:text-[10px] bg-slate-900 text-sky-400 font-mono px-1 py-0.5 rounded border border-slate-800">
               v1.0
             </span>
@@ -120,29 +127,33 @@ export const Navbar = () => {
               Caja & Turnos
             </NavLink>
 
-            <NavLink
-              to="/reservas"
-              className={({ isActive }) =>
-                `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-colors ${
-                  isActive ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-                }`
-              }
-            >
-              <BookmarkCheck className="w-3.5 h-3.5" />
-              Señas
-            </NavLink>
+            {empresa?.modulo_senas !== false && (
+              <NavLink
+                to="/reservas"
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-colors ${
+                    isActive ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+                  }`
+                }
+              >
+                <BookmarkCheck className="w-3.5 h-3.5" />
+                Señas
+              </NavLink>
+            )}
 
-            <NavLink
-              to="/cambios"
-              className={({ isActive }) =>
-                `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-colors ${
-                  isActive ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-                }`
-              }
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Cambios
-            </NavLink>
+            {empresa?.modulo_cambios !== false && (
+              <NavLink
+                to="/cambios"
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-colors ${
+                    isActive ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+                  }`
+                }
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Cambios
+              </NavLink>
+            )}
 
             <NavLink
               to="/catalogo"
@@ -156,17 +167,19 @@ export const Navbar = () => {
               Inventario
             </NavLink>
 
-            <NavLink
-              to="/traspasos"
-              className={({ isActive }) =>
-                `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-colors ${
-                  isActive ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-                }`
-              }
-            >
-              <ArrowLeftRight className="w-3.5 h-3.5" />
-              Traspasos
-            </NavLink>
+            {empresa?.modulo_traspasos && (
+              <NavLink
+                to="/traspasos"
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-colors ${
+                    isActive ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+                  }`
+                }
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                Traspasos
+              </NavLink>
+            )}
 
             {esAdmin && (
               <NavLink
@@ -234,7 +247,7 @@ export const Navbar = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                 <div className="flex items-center gap-2">
-                  <span className="font-black text-lg tracking-widest text-white">ASPEN</span>
+                  <span className="font-black text-lg tracking-widest text-white">{nombreMarca}</span>
                   <span className="text-[10px] bg-slate-900 text-sky-400 font-mono px-1.5 py-0.5 rounded border border-slate-800">
                     v1.0
                   </span>
@@ -309,31 +322,35 @@ export const Navbar = () => {
                   Caja & Turnos
                 </NavLink>
 
-                <NavLink
-                  to="/reservas"
-                  onClick={cerrarMenu}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                      isActive ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20' : 'text-slate-300 hover:bg-slate-900'
-                    }`
-                  }
-                >
-                  <BookmarkCheck className="w-4 h-4" />
-                  Señas
-                </NavLink>
+                {empresa?.modulo_senas !== false && (
+                  <NavLink
+                    to="/reservas"
+                    onClick={cerrarMenu}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        isActive ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20' : 'text-slate-300 hover:bg-slate-900'
+                      }`
+                    }
+                  >
+                    <BookmarkCheck className="w-4 h-4" />
+                    Señas
+                  </NavLink>
+                )}
 
-                <NavLink
-                  to="/cambios"
-                  onClick={cerrarMenu}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                      isActive ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20' : 'text-slate-300 hover:bg-slate-900'
-                    }`
-                  }
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  Cambios
-                </NavLink>
+                {empresa?.modulo_cambios !== false && (
+                  <NavLink
+                    to="/cambios"
+                    onClick={cerrarMenu}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        isActive ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20' : 'text-slate-300 hover:bg-slate-900'
+                      }`
+                    }
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Cambios
+                  </NavLink>
+                )}
 
                 <NavLink
                   to="/catalogo"
@@ -348,18 +365,20 @@ export const Navbar = () => {
                   Inventario
                 </NavLink>
 
-                <NavLink
-                  to="/traspasos"
-                  onClick={cerrarMenu}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                      isActive ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20' : 'text-slate-300 hover:bg-slate-900'
-                    }`
-                  }
-                >
-                  <ArrowLeftRight className="w-4 h-4" />
-                  Traspasos
-                </NavLink>
+                {empresa?.modulo_traspasos && (
+                  <NavLink
+                    to="/traspasos"
+                    onClick={cerrarMenu}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        isActive ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20' : 'text-slate-300 hover:bg-slate-900'
+                      }`
+                    }
+                  >
+                    <ArrowLeftRight className="w-4 h-4" />
+                    Traspasos
+                  </NavLink>
+                )}
 
                 {esAdmin && (
                   <NavLink
