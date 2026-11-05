@@ -21,7 +21,9 @@ import {
   CheckSquare,
   TrendingUp,
   Boxes,
-  Users
+  Users,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 const RUBROS = [
@@ -52,10 +54,10 @@ export const OnboardingView = () => {
   const navigate = useNavigate();
   const [paso, setPaso] = useState<1 | 2 | 3 | 4>(1);
 
-  // Paso 1
+  // Paso 1: Rubro
   const [rubroSeleccionado, setRubroSeleccionado] = useState('indumentaria');
 
-  // Paso 2
+  // Paso 2: Objetivos
   const [objetivos, setObjetivos] = useState<string[]>([
     'ventas',
     'stock',
@@ -64,10 +66,12 @@ export const OnboardingView = () => {
     'tareas_comunicacion'
   ]);
 
-  // Paso 3: Logística
-  const [tieneDeposito, setTieneDeposito] = useState(true);
-  const [nombreLocal, setNombreLocal] = useState('Local Principal');
-  const [nombreDeposito, setNombreDeposito] = useState('Depósito Central');
+  // Paso 3: Logística dinámica
+  const [tieneMultiples, setTieneMultiples] = useState(true);
+  const [sucursalesLista, setSucursalesLista] = useState<string[]>([
+    'Local Principal',
+    'Depósito Central'
+  ]);
 
   // Paso 4: Datos comerciales y usuario
   const [nombreMarca, setNombreMarca] = useState('');
@@ -82,6 +86,23 @@ export const OnboardingView = () => {
     setObjetivos((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
+  };
+
+  const agregarSucursal = () => {
+    setSucursalesLista((prev) => [...prev, `Sucursal ${prev.length + 1}`]);
+  };
+
+  const eliminarSucursal = (index: number) => {
+    if (sucursalesLista.length <= 1) return;
+    setSucursalesLista((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const actualizarNombreSucursal = (index: number, valor: string) => {
+    setSucursalesLista((prev) => {
+      const nueva = [...prev];
+      nueva[index] = valor;
+      return nueva;
+    });
   };
 
   const handleFinalizarRegistro = async (e: React.FormEvent) => {
@@ -102,7 +123,10 @@ export const OnboardingView = () => {
       const userId = authData.user.id;
 
       // 2. Crear la fila en la tabla empresas
-      const slugGenerado = nombreMarca.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(Math.random() * 1000);
+      const slugGenerado =
+        nombreMarca.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(Math.random() * 1000);
+
+      const activaTraspasos = tieneMultiples && sucursalesLista.length > 1;
 
       const { data: empresaData, error: empError } = await supabase
         .from('empresas')
@@ -110,7 +134,7 @@ export const OnboardingView = () => {
           nombre: nombreMarca.trim(),
           slug: slugGenerado,
           rubro: rubroSeleccionado,
-          modulo_traspasos: tieneDeposito,
+          modulo_traspasos: activaTraspasos,
           modulo_senas: objetivos.includes('senas_cambios'),
           modulo_cambios: objetivos.includes('senas_cambios'),
           modulo_tareas: objetivos.includes('tareas_comunicacion'),
@@ -134,34 +158,33 @@ export const OnboardingView = () => {
 
       if (perfError) throw perfError;
 
-      // 4. Crear las sucursales base (Local y Depósito si tildó logística)
-      const { data: sucursalPrincipal, error: suc1Error } = await supabase
+      // 4. Crear las sucursales ingresadas en la lista
+      const sucursalesACrear = tieneMultiples
+        ? sucursalesLista.map((nom) => nom.trim()).filter((nom) => nom.length > 0)
+        : [sucursalesLista[0] || 'Local Principal'];
+
+      const { data: sucsCreadas, error: sucsError } = await supabase
         .from('sucursales')
-        .insert({
-          empresa_id: empresaId,
-          nombre: nombreLocal.trim() || 'Local Mostrador',
-          activa: true
-        })
-        .select('id')
-        .single();
+        .insert(
+          sucursalesACrear.map((nombre) => ({
+            empresa_id: empresaId,
+            nombre,
+            activa: true
+          }))
+        )
+        .select('id');
 
-      if (suc1Error) throw suc1Error;
+      if (sucsError) throw sucsError;
 
-      if (tieneDeposito) {
-        await supabase.from('sucursales').insert({
-          empresa_id: empresaId,
-          nombre: nombreDeposito.trim() || 'Depósito',
-          activa: true
-        });
+      // 5. Asignar la primera sucursal creada como sucursal activa al perfil
+      if (sucsCreadas && sucsCreadas.length > 0) {
+        await supabase
+          .from('perfiles')
+          .update({ sucursal_id: sucsCreadas[0].id })
+          .eq('id', userId);
       }
 
-      // 5. Asignarle la sucursal por defecto al perfil
-      await supabase
-        .from('perfiles')
-        .update({ sucursal_id: sucursalPrincipal.id })
-        .eq('id', userId);
-
-      // 6. Redirigir al inicio del POS listo para operar
+      // 6. Redirigir al inicio del POS
       navigate('/');
       window.location.reload();
     } catch (err: any) {
@@ -217,7 +240,7 @@ export const OnboardingView = () => {
                     type="button"
                     onClick={() => {
                       if (r.id === 'indumentaria') setRubroSeleccionado(r.id);
-                      else alert('Por el momento estamos habilitando tiendas de Indumentaria en este despliegue.');
+                      else alert('Por el momento estamos habilitando tiendas de Indumentaria.');
                     }}
                     className={`p-4 rounded-2xl border text-center flex flex-col items-center justify-center gap-2.5 transition-all cursor-pointer ${
                       seleccionado
@@ -305,7 +328,7 @@ export const OnboardingView = () => {
           </div>
         )}
 
-        {/* PASO 3: LOGÍSTICA & DEPÓSITO */}
+        {/* PASO 3: LOGÍSTICA DINÁMICA CON BOTÓN '+' */}
         {paso === 3 && (
           <div className="space-y-6 animate-in fade-in">
             <div>
@@ -319,30 +342,38 @@ export const OnboardingView = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div
-                onClick={() => setTieneDeposito(true)}
+                onClick={() => {
+                  setTieneMultiples(true);
+                  if (sucursalesLista.length < 2) {
+                    setSucursalesLista(['Local Principal', 'Depósito Central']);
+                  }
+                }}
                 className={`p-5 rounded-2xl border cursor-pointer transition-all ${
-                  tieneDeposito
+                  tieneMultiples
                     ? 'bg-sky-500/10 border-sky-400 ring-2 ring-sky-400/20'
                     : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
               >
                 <Warehouse className="w-7 h-7 text-sky-400 mb-2" />
-                <h3 className="font-bold text-white text-sm">Sí, manejo Local y Depósito / 2 Locales</h3>
+                <h3 className="font-bold text-white text-sm">Varios Locales y/o Depósitos</h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Se activará el módulo de Traspasos para mover prendas entre depósito y mostrador.
+                  Se activará el módulo de Traspasos para mover stock entre sucursales y depósito.
                 </p>
               </div>
 
               <div
-                onClick={() => setTieneDeposito(false)}
+                onClick={() => {
+                  setTieneMultiples(false);
+                  setSucursalesLista([sucursalesLista[0] || 'Local Único']);
+                }}
                 className={`p-5 rounded-2xl border cursor-pointer transition-all ${
-                  !tieneDeposito
+                  !tieneMultiples
                     ? 'bg-sky-500/10 border-sky-400 ring-2 ring-sky-400/20'
                     : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
               >
                 <Store className="w-7 h-7 text-emerald-400 mb-2" />
-                <h3 className="font-bold text-white text-sm">No, es un único punto de venta</h3>
+                <h3 className="font-bold text-white text-sm">Un único punto de venta</h3>
                 <p className="text-xs text-slate-400 mt-1">
                   Todo el stock se centralizará en una sola vista sin menús innecesarios de envío.
                 </p>
@@ -350,35 +381,48 @@ export const OnboardingView = () => {
             </div>
 
             <div className="space-y-3 pt-2">
-              <div>
-                <label className="block text-xs uppercase font-bold text-slate-400 mb-1">
-                  Nombre de tu local / showroom principal
+              <div className="flex items-center justify-between">
+                <label className="text-xs uppercase font-bold text-slate-400">
+                  {tieneMultiples ? 'Puntos de Venta / Depósitos a Configurar' : 'Nombre del Local'}
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={nombreLocal}
-                  onChange={(e) => setNombreLocal(e.target.value)}
-                  placeholder="Ej. Showroom Centro o Local 1"
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500"
-                />
+                {tieneMultiples && (
+                  <button
+                    type="button"
+                    onClick={agregarSucursal}
+                    className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1 bg-sky-500/10 border border-sky-500/20 px-2.5 py-1 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Agregar Sucursal / Depósito
+                  </button>
+                )}
               </div>
 
-              {tieneDeposito && (
-                <div>
-                  <label className="block text-xs uppercase font-bold text-slate-400 mb-1">
-                    Nombre del Depósito / Taller
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={nombreDeposito}
-                    onChange={(e) => setNombreDeposito(e.target.value)}
-                    placeholder="Ej. Depósito Central o Taller"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500"
-                  />
-                </div>
-              )}
+              <div className="space-y-2.5">
+                {sucursalesLista.map((nombreSuc, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-bold text-slate-500 w-6 text-center">
+                      #{idx + 1}
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      value={nombreSuc}
+                      onChange={(e) => actualizarNombreSucursal(idx, e.target.value)}
+                      placeholder={idx === 0 ? 'Ej. Local Centro' : idx === 1 ? 'Ej. Depósito Central' : `Sucursal ${idx + 1}`}
+                      className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500"
+                    />
+                    {tieneMultiples && sucursalesLista.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => eliminarSucursal(idx)}
+                        className="p-2.5 text-slate-500 hover:text-rose-400 hover:bg-slate-900 rounded-xl transition-colors cursor-pointer"
+                        title="Eliminar este punto"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="flex justify-between pt-4">
