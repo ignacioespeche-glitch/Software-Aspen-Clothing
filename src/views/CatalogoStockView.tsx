@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import type { Categoria, } from '../types/database';
+import type { Categoria } from '../types/database';
 import { 
   Boxes, 
   Plus, 
@@ -23,7 +23,7 @@ interface TalleCatalogo {
 }
 
 export const CatalogoStockView = () => {
-  const { perfil, sucursalActiva } = useAuth();
+  const { perfil, sucursalActiva, empresa } = useAuth();
 
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [talles, setTalles] = useState<TalleCatalogo[]>([]);
@@ -64,14 +64,16 @@ export const CatalogoStockView = () => {
   const sucursalEfectivaNombre = sucursalActiva?.nombre || 'Sucursal Asignada';
 
   useEffect(() => {
-    cargarDatosMaestros();
-  }, []);
+    if (empresa?.id) {
+      cargarDatosMaestros();
+    }
+  }, [empresa?.id]);
 
   useEffect(() => {
-    if (sucursalEfectivaId) {
+    if (sucursalEfectivaId && empresa?.id) {
       cargarProductos();
     }
-  }, [sucursalEfectivaId]);
+  }, [sucursalEfectivaId, empresa?.id]);
 
   useEffect(() => {
     if (productoSeleccionado && sucursalEfectivaId) {
@@ -80,8 +82,13 @@ export const CatalogoStockView = () => {
   }, [productoSeleccionado, sucursalEfectivaId]);
 
   const cargarDatosMaestros = async () => {
+    let catQuery = supabase.from('categorias').select('*').order('orden');
+    if (empresa?.id) {
+      catQuery = catQuery.eq('empresa_id', empresa.id);
+    }
+
     const [resCat, resTalles] = await Promise.all([
-      supabase.from('categorias').select('*').order('orden'),
+      catQuery,
       supabase.from('talles_catalogo').select('*').order('orden')
     ]);
 
@@ -100,7 +107,7 @@ export const CatalogoStockView = () => {
   };
 
   const cargarProductos = async () => {
-    if (!sucursalEfectivaId) return;
+    if (!sucursalEfectivaId || !empresa?.id) return;
 
     const { data } = await supabase
       .from('productos')
@@ -122,6 +129,7 @@ export const CatalogoStockView = () => {
           stock_sucursal (cantidad, sucursal_id)
         )
       `)
+      .eq('empresa_id', empresa.id)
       .eq('activo', true)
       .order('nombre');
 
@@ -200,8 +208,8 @@ export const CatalogoStockView = () => {
     setErrorModal(null);
     setMensaje(null);
 
-    if (!sucursalEfectivaId) {
-      setErrorModal('No se detectó la sucursal asignada del usuario.');
+    if (!sucursalEfectivaId || !empresa?.id) {
+      setErrorModal('No se detectó la sucursal o la empresa asignada del usuario.');
       return;
     }
 
@@ -221,6 +229,7 @@ export const CatalogoStockView = () => {
       const { data: existente } = await supabase
         .from('productos')
         .select('*')
+        .eq('empresa_id', empresa.id)
         .ilike('nombre', nuevoNombre.trim())
         .maybeSingle();
 
@@ -230,6 +239,7 @@ export const CatalogoStockView = () => {
         const { data: nuevo, error: prodErr } = await supabase
           .from('productos')
           .insert({
+            empresa_id: empresa.id,
             nombre: nuevoNombre.trim(),
             categoria_id: nuevaCategoriaId,
             precio_costo: parseFloat(nuevoCosto),

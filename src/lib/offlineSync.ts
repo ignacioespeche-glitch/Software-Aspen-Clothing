@@ -1,9 +1,15 @@
-import { openDB } from 'idb';
-import type { DBSchema } from 'idb';
 import { supabase } from './supabase';
 
-interface VentaOffline {
-  idLocal?: number;
+export interface VentaOfflineItem {
+  variante_id: string;
+  cantidad: number;
+  precio_unitario: number;
+  costo_unitario: number;
+}
+
+export interface VentaOffline {
+  id?: string;
+  empresa_id?: string;
   sucursal_id: string;
   caja_turno_id: string;
   vendedor_id: string;
@@ -14,61 +20,43 @@ interface VentaOffline {
   total_final: number;
   metodo_pago: string;
   detalles_pago: any;
-  items: Array<{
-    variante_id: string;
-    cantidad: number;
-    precio_unitario: number;
-    costo_unitario: number;
-  }>;
+  items: VentaOfflineItem[];
   created_at: string;
 }
 
-interface AspenDB extends DBSchema {
-  ventas_offline: {
-    key: number;
-    value: VentaOffline;
-    indexes: { 'by-date': string };
-  };
-}
+const STORAGE_KEY = 'aspen_ventas_offline';
 
-export const getDB = async () => {
-  return openDB<AspenDB>('aspen_offline_db', 1, {
-    upgrade(db) {
-      const store = db.createObjectStore('ventas_offline', {
-        keyPath: 'idLocal',
-        autoIncrement: true,
-      });
-      store.createIndex('by-date', 'created_at');
-    },
-  });
+export const guardarVentaOffline = async (venta: VentaOffline): Promise<void> => {
+  const guardadas = obtenerVentasOffline();
+  guardadas.push({ ...venta, id: `offline_${Date.now()}` });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(guardadas));
 };
 
-export const guardarVentaOffline = async (venta: VentaOffline) => {
-  const db = await getDB();
-  return db.add('ventas_offline', venta);
+export const obtenerVentasOffline = (): VentaOffline[] => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
 };
 
-export const obtenerVentasOffline = async () => {
-  const db = await getDB();
-  return db.getAll('ventas_offline');
-};
+export const sincronizarVentasOffline = async (): Promise<{ exitosas: number; fallidas: number }> => {
+  const pendientes = obtenerVentasOffline();
+  if (pendientes.length === 0) return { exitosas: 0, fallidas: 0 };
 
-export const sincronizarVentasPendientes = async (): Promise<number> => {
-  const db = await getDB();
-  const pendientes = await db.getAll('ventas_offline');
-
-  if (pendientes.length === 0) return 0;
-
-  let sincronizadas = 0;
+  let exitosas = 0;
+  const restantes: VentaOffline[] = [];
 
   for (const v of pendientes) {
     try {
-      const { data: ventaData, error: vError } = await supabase
+      const { data: ventaData, error: errVenta } = await supabase
         .from('ventas')
         .insert({
+          empresa_id: v.empresa_id,
           sucursal_id: v.sucursal_id,
           caja_turno_id: v.caja_turno_id,
-          vendedor_id: v.vendedor_id,
+          vendedor_id: v.vendedor_id || null,
           cliente_id: v.cliente_id,
           subtotal: v.subtotal,
           descuento_tipo: v.descuento_tipo,
@@ -82,7 +70,7 @@ export const sincronizarVentasPendientes = async (): Promise<number> => {
         .select('id')
         .single();
 
-      if (vError) throw vError;
+      if (errVenta) throw errVenta;
 
       for (const item of v.items) {
         await supabase.from('ventas_detalle').insert({
@@ -101,24 +89,23 @@ export const sincronizarVentasPendientes = async (): Promise<number> => {
           .eq('sucursal_id', v.sucursal_id)
           .single();
 
-        const nuevoStock = Math.max(0, (stockData?.cantidad || 0) - item.cantidad);
-
+        const stockActual = stockData?.cantidad || 0;
         await supabase
           .from('stock_sucursal')
-          .update({ cantidad: nuevoStock, updated_at: new Date().toISOString() })
+          .update({
+            cantidad: Math.max(0, stockActual - item.cantidad),
+            updated_at: new Date().toISOString(),
+          })
           .eq('variante_id', item.variante_id)
           .eq('sucursal_id', v.sucursal_id);
       }
 
-      if (v.idLocal) {
-        await db.delete('ventas_offline', v.idLocal);
-      }
-      sincronizadas++;
-    } catch (error) {
-      console.error('Error sincronizando venta:', error);
-      break;
+      exitosas++;
+    } catch {
+      restantes.push(v);
     }
   }
 
-  return sincronizadas;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(restantes));
+  return { exitosas, fallidas: restantes.length };
 };

@@ -41,7 +41,7 @@ interface CarritoPestaña {
 }
 
 export const PosView = () => {
-  const { perfil, sucursalActiva, cajaActiva } = useAuth();
+  const { perfil, sucursalActiva, cajaActiva, empresa } = useAuth();
 
   const [productos, setProductos] = useState<any[]>([]);
   const [busqueda, setBusqueda] = useState('');
@@ -85,45 +85,55 @@ export const PosView = () => {
   const [ticketDetalleVendedor, setTicketDetalleVendedor] = useState<any | null>(null);
 
   useEffect(() => {
-    cargarCatalogoPOS();
-  }, [sucursalActiva]);
+    if (sucursalActiva && empresa?.id) {
+      cargarCatalogoPOS();
+    }
+  }, [sucursalActiva, empresa?.id]);
 
   const cargarCatalogoPOS = async () => {
-    if (!sucursalActiva) return;
+    if (!sucursalActiva || !empresa?.id) return;
 
     try {
       const [resCat, resProd] = await Promise.all([
-        supabase.from('categorias').select('*').order('orden'),
-        supabase.from('productos').select(`
-          *,
-          categorias (nombre),
-          productos_precios_sucursal (
-            id,
-            sucursal_id,
-            precio_costo,
-            precio_venta
-          ),
-          variantes (
-            id,
-            color,
-            sku_interno,
-            talles_catalogo (etiqueta, orden),
-            stock_sucursal (cantidad, sucursal_id)
-          )
-        `).eq('activo', true)
+        supabase
+          .from('categorias')
+          .select('*')
+          .eq('empresa_id', empresa.id)
+          .order('orden'),
+        supabase
+          .from('productos')
+          .select(`
+            *,
+            categorias (nombre),
+            productos_precios_sucursal (
+              id,
+              sucursal_id,
+              precio_costo,
+              precio_venta
+            ),
+            variantes (
+              id,
+              color,
+              sku_interno,
+              talles_catalogo (etiqueta, orden),
+              stock_sucursal (cantidad, sucursal_id)
+            )
+          `)
+          .eq('empresa_id', empresa.id)
+          .eq('activo', true)
       ]);
 
       if (resCat.data) {
         setCategorias(resCat.data);
-        localStorage.setItem('aspen_cache_categorias', JSON.stringify(resCat.data));
+        localStorage.setItem(`pos_cache_categorias_${empresa.id}`, JSON.stringify(resCat.data));
       }
       if (resProd.data) {
         setProductos(resProd.data);
-        localStorage.setItem('aspen_cache_productos', JSON.stringify(resProd.data));
+        localStorage.setItem(`pos_cache_productos_${empresa.id}`, JSON.stringify(resProd.data));
       }
     } catch {
-      const cacheCat = localStorage.getItem('aspen_cache_categorias');
-      const cacheProd = localStorage.getItem('aspen_cache_productos');
+      const cacheCat = localStorage.getItem(`pos_cache_categorias_${empresa.id}`);
+      const cacheProd = localStorage.getItem(`pos_cache_productos_${empresa.id}`);
       if (cacheCat) setCategorias(JSON.parse(cacheCat));
       if (cacheProd) setProductos(JSON.parse(cacheProd));
     }
@@ -201,7 +211,7 @@ export const PosView = () => {
     const stockActual = variante.stock_sucursal?.find((s: any) => s.sucursal_id === sucursalActiva?.id)?.cantidad || 0;
 
     if (stockActual <= 0 && navigator.onLine) {
-      setMensajePos(`Sin stock para ${producto.nombre} (${variante.color} - Talle ${variante.talles_catalogo?.etiqueta}) en este local.`);
+      setMensajePos(`Sin stock para ${producto.nombre} (${variante.color} • Talle ${variante.talles_catalogo?.etiqueta}) en este local.`);
       return;
     }
 
@@ -308,7 +318,7 @@ export const PosView = () => {
 
   const handleConfirmarVenta = async () => {
     setErrorCobro(null);
-    if (!cajaActiva || !sucursalActiva) {
+    if (!cajaActiva || !sucursalActiva || !empresa?.id) {
       setErrorCobro('La caja debe estar abierta para registrar ventas.');
       return;
     }
@@ -333,6 +343,7 @@ export const PosView = () => {
 
     if (!navigator.onLine) {
       await guardarVentaOffline({
+        empresa_id: empresa.id,
         sucursal_id: sucursalActiva.id,
         caja_turno_id: cajaActiva.id,
         vendedor_id: idVendedorReal || '',
@@ -371,10 +382,11 @@ export const PosView = () => {
           .from('clientes')
           .upsert(
             {
+              empresa_id: empresa.id,
               telefono_whatsapp: clienteGuardadoTelefono,
               nombre: clienteGuardadoNombre || 'Cliente Mostrador'
             },
-            { onConflict: 'telefono_whatsapp' }
+            { onConflict: 'empresa_id,telefono_whatsapp' }
           )
           .select('id')
           .single();
@@ -386,6 +398,7 @@ export const PosView = () => {
       const { data: ventaData, error: ventaError } = await supabase
         .from('ventas')
         .insert({
+          empresa_id: empresa.id,
           sucursal_id: sucursalActiva.id,
           caja_turno_id: cajaActiva.id,
           vendedor_id: idVendedorReal,
@@ -468,10 +481,11 @@ export const PosView = () => {
 
     const linkComprobante = `${window.location.origin}/ticket/${toastExito.ventaId}`;
     const nombreParaMensaje = toastExito.clienteNombre || 'genio/a';
+    const nombreMarca = empresa?.nombre?.toUpperCase() || 'ASPEN CLOTHING';
 
     const mensaje = encodeURIComponent(
       `BUENASSS ${nombreParaMensaje.toUpperCase()}! 👋\n` +
-      `Somos del equipo de *ASPEN CLOTHING* (${sucursalActiva?.nombre}).\n\n` +
+      `Somos del equipo de *${nombreMarca}* (${sucursalActiva?.nombre}).\n\n` +
       `¡Te enviamos tu comprobante de compra por un total de *$${toastExito.monto.toLocaleString()}*!\n\n` +
       `Podés consultar tu ticket digital y las políticas de cambio ingresando acá:\n${linkComprobante}\n\n` +
       `¡Muchas gracias por elegirnos!`
@@ -694,7 +708,7 @@ export const PosView = () => {
                 <div>
                   <p className="font-bold text-slate-100">{item.productoNombre}</p>
                   <p className="text-slate-400 text-[11px]">
-                    {item.color} - Talle {item.talle}
+                    {item.color} • Talle {item.talle}
                   </p>
                   <p className="text-emerald-400 font-semibold mt-0.5">
                     ${Number(item.precioUnitario).toLocaleString()}
@@ -1145,7 +1159,7 @@ export const PosView = () => {
                     <p className="font-bold uppercase text-[10px] text-slate-500">Prendas:</p>
                     {ticketDetalleVendedor.ventas_detalle?.map((d: any) => (
                       <div key={d.id} className="flex justify-between text-slate-300">
-                        <span>{d.variantes?.productos?.nombre} ({d.variantes?.color} - Talle {d.variantes?.talles_catalogo?.etiqueta}) ×{d.cantidad}</span>
+                        <span>{d.variantes?.productos?.nombre} ({d.variantes?.color} • Talle {d.variantes?.talles_catalogo?.etiqueta}) ×{d.cantidad}</span>
                         <span className="font-mono">${Number(d.subtotal_linea).toLocaleString()}</span>
                       </div>
                     ))}
