@@ -1,5 +1,18 @@
+export interface Empresa {
+  id: string;
+  nombre: string;
+  slug?: string;
+  rubro: string;
+  modulo_traspasos: boolean;
+  modulo_senas: boolean;
+  modulo_cambios: boolean;
+  activa: boolean;
+  created_at?: string;
+}
+
 export interface Sucursal {
   id: string;
+  empresa_id: string;
   nombre: string;
   direccion?: string;
   telefono?: string;
@@ -9,6 +22,7 @@ export interface Sucursal {
 
 export interface Perfil {
   id: string;
+  empresa_id: string;
   nombre: string;
   apellido?: string;
   rol: 'admin' | 'vendedor';
@@ -19,6 +33,7 @@ export interface Perfil {
 
 export interface Categoria {
   id: string;
+  empresa_id: string;
   nombre: string;
   orden: number;
   created_at: string;
@@ -48,6 +63,7 @@ export interface ProductoPrecioSucursal {
 
 export interface Producto {
   id: string;
+  empresa_id: string;
   categoria_id: string;
   curva_talles_id?: string;
   nombre: string;
@@ -81,8 +97,10 @@ export interface StockSucursal {
 
 export interface CajaTurno {
   id: string;
+  empresa_id: string;
   sucursal_id: string;
   vendedor_id: string;
+  usuario_cierre_id?: string;
   fecha_apertura: string;
   fecha_cierre?: string;
   monto_inicial_efectivo: number;
