@@ -11,6 +11,7 @@ import { ReservasView } from './views/ReservasView';
 import { LoginView } from './views/LoginView';
 import { TicketPublicoView } from './views/TicketPublicoView';
 import { OnboardingView } from './views/OnboardingView';
+import { TareasView } from './views/TareasView';
 
 const RutaProtegida = ({ children, soloAdmin = false }: { children: React.ReactNode; soloAdmin?: boolean }) => {
   const { perfil, loading } = useAuth();
@@ -107,6 +108,14 @@ const ContenedorPrincipal = () => {
           element={
             <RutaProtegida>
               <TraspasosView />
+            </RutaProtegida>
+          }
+        />
+        <Route
+          path="/tareas"
+          element={
+            <RutaProtegida>
+              <TareasView />
             </RutaProtegida>
           }
         />

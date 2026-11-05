@@ -16,7 +16,8 @@ import {
   Wifi,
   WifiOff,
   Menu,
-  X
+  X,
+  CheckSquare
 } from 'lucide-react';
 
 export const Navbar = () => {
@@ -178,6 +179,20 @@ export const Navbar = () => {
               >
                 <ArrowLeftRight className="w-3.5 h-3.5" />
                 Traspasos
+              </NavLink>
+            )}
+
+            {Boolean((empresa as any)?.modulo_tareas) && (
+              <NavLink
+                to="/tareas"
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-colors ${
+                    isActive ? 'bg-sky-500/10 text-sky-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+                  }`
+                }
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                Tareas
               </NavLink>
             )}
 
@@ -377,6 +392,21 @@ export const Navbar = () => {
                   >
                     <ArrowLeftRight className="w-4 h-4" />
                     Traspasos
+                  </NavLink>
+                )}
+
+                {Boolean((empresa as any)?.modulo_tareas) && (
+                  <NavLink
+                    to="/tareas"
+                    onClick={cerrarMenu}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        isActive ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20' : 'text-slate-300 hover:bg-slate-900'
+                      }`
+                    }
+                  >
+                    <CheckSquare className="w-4 h-4" />
+                    Tareas
                   </NavLink>
                 )}
 
