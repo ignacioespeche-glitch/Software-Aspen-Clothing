@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import type { Sucursal } from '../types/database';
-import { Lock, Mail, User, Store, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Lock, Mail, User, Store, ArrowRight, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 
 export const LoginView = () => {
   const navigate = useNavigate();
@@ -75,7 +75,7 @@ export const LoginView = () => {
         await supabase.auth.signOut();
         setMensaje({
           tipo: 'error',
-          texto: 'Tu cuenta está pendiente de aprobación por el Administrador de Aspen Clothing.'
+          texto: 'Tu cuenta está pendiente de aprobación por el Administrador.'
         });
         setLoading(false);
         return;
@@ -141,12 +141,36 @@ export const LoginView = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4">
+      {/* Banner / CTA destacado para nuevos dueños de tiendas */}
+      <div className="mb-6 max-w-md w-full">
+        <button
+          type="button"
+          onClick={() => navigate('/onboarding')}
+          className="w-full bg-gradient-to-r from-sky-500/10 via-sky-500/20 to-emerald-500/10 border border-sky-500/30 hover:border-sky-400 p-3.5 rounded-2xl flex items-center justify-between text-left transition-all hover:scale-[1.01] group cursor-pointer shadow-lg"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-sky-500/20 rounded-xl text-sky-400 group-hover:bg-sky-500 group-hover:text-slate-950 transition-colors">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs font-black text-white uppercase tracking-wider">
+                ¿Querés usar el software en tu tienda?
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Configurá tu marca, sucursales y objetivos en 1 minuto
+              </p>
+            </div>
+          </div>
+          <ArrowRight className="w-4 h-4 text-sky-400 group-hover:translate-x-1 transition-transform" />
+        </button>
+      </div>
+
       <div className="mb-6 text-center">
         <h1 className="text-3xl font-black tracking-widest uppercase text-white">
-          Aspen Clothing
+          SISTEMA POS
         </h1>
         <p className="text-xs text-sky-400 font-semibold tracking-wider uppercase mt-1">
-          Sistema Central de Mostrador & Inventario
+          Plataforma de Mostrador, Stock & Gestión de Tiendas
         </p>
       </div>
 
@@ -157,7 +181,7 @@ export const LoginView = () => {
           </h2>
           <p className="text-xs text-slate-400 mt-1">
             {esRegistro
-              ? 'Completá tus datos reales para solicitar acceso'
+              ? 'Completá tus datos reales para solicitar acceso a un local existente'
               : 'Ingresá con tu cuenta autorizada'}
           </p>
         </div>
@@ -294,7 +318,7 @@ export const LoginView = () => {
             }}
             className="text-xs text-slate-400 hover:text-sky-400 font-medium cursor-pointer transition-colors"
           >
-            {esRegistro ? '¿Ya tenés cuenta? Iniciar Sesión' : '¿Nuevo vendedor? Registrarse'}
+            {esRegistro ? '¿Ya tenés cuenta? Iniciar Sesión' : '¿Empleado de local existente? Solicitar acceso'}
           </button>
         </div>
       </div>
