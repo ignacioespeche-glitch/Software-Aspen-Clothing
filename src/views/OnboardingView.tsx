@@ -46,7 +46,7 @@ const OBJETIVOS_LISTA = [
   { id: 'stock', label: 'Controlar mi stock con curvas de talles y colores', icon: Boxes, default: true },
   { id: 'caja_ciega', label: 'Delegar tareas a empleados y arqueo ciego de caja', icon: Users, default: true },
   { id: 'senas_cambios', label: 'Controlar señas, reservas y cambios de prendas', icon: Layers, default: true },
-  { id: 'tareas_comunicacion', label: 'Coordinar tareas internas y novedades de equipo (Shot Call)', icon: CheckSquare, default: true },
+  { id: 'tareas_comunicacion', label: 'Coordinar tareas internas y novedades de equipo (SouthCol)', icon: CheckSquare, default: true },
   { id: 'gastos_proveedores', label: 'Registrar gastos fijos y cuentas por pagar a talleres/proveedores', icon: Building2, default: false }
 ];
 
@@ -147,7 +147,7 @@ export const OnboardingView = () => {
       if (empError) throw empError;
       const empresaId = empresaData.id;
 
-      // 3. Crear el perfil del usuario administrador
+      // 3. Crear el perfil del usuario como Administrador habilitado
       const { error: perfError } = await supabase.from('perfiles').insert({
         id: userId,
         empresa_id: empresaId,
@@ -464,7 +464,7 @@ export const OnboardingView = () => {
                 <input
                   type="text"
                   required
-                  placeholder="Ej. Shot Call"
+                  placeholder="Ej. SouthCol"
                   value={nombreMarca}
                   onChange={(e) => setNombreMarca(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500"
@@ -493,7 +493,7 @@ export const OnboardingView = () => {
                   <input
                     type="email"
                     required
-                    placeholder="juan@shotcall.com"
+                    placeholder="juan@southcol.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500"
