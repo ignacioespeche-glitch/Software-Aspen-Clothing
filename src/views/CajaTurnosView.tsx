@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { DollarSign, ArrowDownCircle, ArrowUpCircle, User, CreditCard } from 'lucide-react';
 
 export const CajaTurnosView = () => {
-  const { perfil, sucursalActiva, cajaActiva, recargarCajaActiva } = useAuth();
+  const { perfil, sucursalActiva, cajaActiva, recargarCajaActiva, empresa } = useAuth();
   
   const [montoInicial, setMontoInicial] = useState('');
   const [movimientos, setMovimientos] = useState<any[]>([]);
@@ -59,7 +59,15 @@ export const CajaTurnosView = () => {
       return;
     }
 
+    const empresaIdEfectivo = empresa?.id || perfil?.empresa_id;
+
+    if (!empresaIdEfectivo) {
+      alert('Error: No se detectó la empresa asignada.');
+      return;
+    }
+
     const { error } = await supabase.from('cajas_turnos').insert({
+      empresa_id: empresaIdEfectivo,
       sucursal_id: sucursalActiva.id,
       vendedor_id: perfil.id,
       monto_inicial_efectivo: parseFloat(montoInicial),
@@ -78,7 +86,10 @@ export const CajaTurnosView = () => {
     e.preventDefault();
     if (!cajaActiva || !montoGasto || !motivoGasto) return;
 
+    const empresaIdEfectivo = empresa?.id || perfil?.empresa_id;
+
     const { error } = await supabase.from('movimientos_caja_chica').insert({
+      empresa_id: empresaIdEfectivo,
       caja_turno_id: cajaActiva.id,
       tipo: tipoGasto,
       metodo_pago: metodoPagoMovimiento,
